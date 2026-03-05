@@ -9,12 +9,29 @@ Minimal Vue + Pixi + Live2D stage intended to be embedded and controlled by Open
 - Loads a Live2D model (default: the public Shizuku sample model).
 - Exposes a small `postMessage` API for OpenClaw to control the stage.
 
-## Runtime controls
+## Bridge protocol
 
-- `MIKU_LOAD`: `{ modelUrl?: string }`
-- `MIKU_TALK`: `{ motion?: string }`
-- `MIKU_FOCUS`: `{ x?: number, y?: number, scale?: number }`
-- `MIKU_PING`: asks the frame to reply with `MIKU_READY`
+The stage now supports a versioned bridge envelope:
+
+```json
+{
+  "v": 1,
+  "type": "stage.command",
+  "sessionId": "optional-session-id",
+  "payload": {
+    "command": "model_motion",
+    "payload": {
+      "motion": "tap_body"
+    }
+  }
+}
+```
+
+Supported stage commands:
+
+- `load_model`: `{ modelUrl: string }`
+- `model_motion`: `{ motion: string }`
+- `model_focus`: `{ x?: number, y?: number, scale?: number }`
 
 ## Model configuration
 
@@ -28,4 +45,14 @@ Override the default model by either:
 ```sh
 npm install
 npm run dev
+```
+
+## Sending commands from CLI
+
+Use one generic script instead of one file per action:
+
+```sh
+node send-command.cjs model_motion '{"motion":"tap_body"}'
+node send-command.cjs model_focus '{"x":540,"y":430,"scale":0.85}'
+node send-command.cjs load_model '{"modelUrl":"https://cdn.jsdelivr.net/gh/guansss/pixi-live2d-display/test/assets/haru/haru_greeter_t03.model3.json"}'
 ```

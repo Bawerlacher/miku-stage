@@ -277,15 +277,15 @@ Example shape:
 - `interrupt`
 - `ping`
 
-### Mapping To Current Miku Stage Commands
+### Stage Command Contract
 
-The current local command API can be preserved as internal browser actions:
+The stage runtime accepts canonical stage commands only:
 
-- `MIKU_LOAD` -> internal handler for `load_model`
-- `MIKU_TALK` -> internal handler for `model_motion`
-- `MIKU_FOCUS` -> internal handler for `model_focus`
+- `load_model`
+- `model_motion`
+- `model_focus`
 
-The existing `postMessage` API remains useful for iframe or admin control, but it should not be the primary backend protocol.
+Legacy `MIKU_*` aliases are intentionally removed to keep OpenClaw integration strict and predictable.
 
 ## Frontend Responsibilities
 
