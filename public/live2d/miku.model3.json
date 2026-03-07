@@ -8,9 +8,68 @@
 		"Physics": "miku.physics3.json",
 		"DisplayInfo": "miku.cdi3.json",
 		"Motions": {
-			"Idle": [{
-				"File": "motion/idle.motion3.json"
-			}]
+			"Angry": [
+				{
+					"File": "motion/angry.motion3.json"
+				}
+			],
+			"Happy": [
+				{
+					"File": "motion/happy.motion3.json"
+				}
+			],
+			"Idle": [
+				{
+					"File": "motion/idle.motion3.json"
+				}
+			],
+			"Naughty": [
+				{
+					"File": "motion/naughty.motion3.json"
+				}
+			],
+			"Nod": [
+				{
+					"File": "motion/nod.motion3.json"
+				}
+			],
+			"Sad": [
+				{
+					"File": "motion/sad.motion3.json"
+				}
+			],
+			"Shake": [
+				{
+					"File": "motion/shake.motion3.json"
+				}
+			],
+			"Shakehead": [
+				{
+					"File": "motion/shakehead.motion3.json"
+				}
+			],
+			"Shy": [
+				{
+					"File": "motion/shy.motion3.json"
+				}
+			],
+			"Surprise": [
+				{
+					"File": "motion/surprise.motion3.json"
+				}
+			]
 		}
-	}
+	},
+	"Groups": [
+		{
+			"Target": "Parameter",
+			"Name": "EyeBlink",
+			"Ids": []
+		},
+		{
+			"Target": "Parameter",
+			"Name": "LipSync",
+			"Ids": []
+		}
+	]
 }
