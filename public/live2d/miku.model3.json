@@ -1,0 +1,16 @@
+{
+	"Version": 3,
+	"FileReferences": {
+		"Moc": "miku.moc3",
+		"Textures": [
+			"miku.1024/texture_00.png"
+		],
+		"Physics": "miku.physics3.json",
+		"DisplayInfo": "miku.cdi3.json",
+		"Motions": {
+			"Idle": [{
+				"File": "motion/idle.motion3.json"
+			}]
+		}
+	}
+}

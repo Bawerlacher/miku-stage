@@ -35,8 +35,7 @@ const cubismCoreSources = [
   'https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js',
   'https://cubism.live2d.com/sdk-res/js/cubismcore/live2dcubismcore.min.js',
 ]
-const defaultModelUrl =
-  'https://cdn.jsdelivr.net/gh/guansss/pixi-live2d-display/test/assets/haru/haru_greeter_t03.model3.json'
+const defaultModelUrl = `${import.meta.env.BASE_URL}live2d/miku.model3.json`
 const clientName = 'miku-stage'
 const reconnectBaseDelayMs = 1_000
 const reconnectMaxDelayMs = 15_000
@@ -50,6 +49,7 @@ let isUnmounting = false
 let bridgeSessionId: string | null = null
 let currentModel: Live2DModelInstance | null = null
 let currentModelUrl = resolveInitialModelUrl()
+let pointerTrackingBound = false
 
 runtimeWindow.PIXI = PIXI
 
@@ -172,6 +172,91 @@ function layoutModel(model: Live2DModelInstance) {
   model.position.set(width / 2, height / 2)
 }
 
+function normalizeModelId(rawId: unknown) {
+  if (typeof rawId === 'string') {
+    return rawId
+  }
+
+  if (rawId && typeof rawId === 'object') {
+    const idObject = rawId as { s?: unknown }
+    if (typeof idObject.s === 'string') {
+      return idObject.s
+    }
+  }
+
+  return null
+}
+
+function remapFocusParameterIds(model: Live2DModelInstance) {
+  const internalModel = (model as any)?.internalModel
+  const coreModel = internalModel?.coreModel
+  const coreParameterIds: unknown[] = Array.isArray(coreModel?._parameterIds)
+    ? coreModel._parameterIds
+    : []
+  const parameterIds = coreParameterIds
+    .map((id) => normalizeModelId(id))
+    .filter((id): id is string => Boolean(id))
+
+  if (!parameterIds.length || !internalModel) {
+    return
+  }
+
+  const availableIds = new Set(parameterIds)
+  const mappings: Array<[string, string[]]> = [
+    ['idParamEyeBallX', ['PARAM_EYE_BALL_X', 'ParamEyeBallX']],
+    ['idParamEyeBallY', ['PARAM_EYE_BALL_Y', 'ParamEyeBallY']],
+    ['idParamAngleX', ['PARAM_ANGLE_X', 'ParamAngleX']],
+    ['idParamAngleY', ['PARAM_ANGLE_Y', 'ParamAngleY']],
+    ['idParamAngleZ', ['PARAM_ANGLE_Z', 'ParamAngleZ']],
+    ['idParamBodyAngleX', ['PARAM_BODY_ANGLE_X', 'ParamBodyAngleX']],
+  ]
+
+  for (const [field, candidates] of mappings) {
+    const matchedId = candidates.find((candidate) => availableIds.has(candidate))
+    if (matchedId) {
+      internalModel[field] = matchedId
+    }
+  }
+}
+
+function handlePointerMove(event: PointerEvent) {
+  if (!currentModel) {
+    return
+  }
+
+  currentModel.focus(event.clientX, event.clientY)
+}
+
+function handlePointerLeave() {
+  if (!currentModel) {
+    return
+  }
+
+  const width = stageHost.value?.clientWidth || window.innerWidth
+  const height = stageHost.value?.clientHeight || window.innerHeight
+  currentModel.focus(width / 2, height / 2)
+}
+
+function bindPointerTracking() {
+  if (pointerTrackingBound || !stageHost.value) {
+    return
+  }
+
+  stageHost.value.addEventListener('pointermove', handlePointerMove)
+  stageHost.value.addEventListener('pointerleave', handlePointerLeave)
+  pointerTrackingBound = true
+}
+
+function unbindPointerTracking() {
+  if (!pointerTrackingBound || !stageHost.value) {
+    return
+  }
+
+  stageHost.value.removeEventListener('pointermove', handlePointerMove)
+  stageHost.value.removeEventListener('pointerleave', handlePointerLeave)
+  pointerTrackingBound = false
+}
+
 async function loadModel(nextModelUrl = currentModelUrl) {
   if (!app) {
     return
@@ -194,6 +279,7 @@ async function loadModel(nextModelUrl = currentModelUrl) {
 
     app.stage.addChild(nextModel)
     layoutModel(nextModel)
+    remapFocusParameterIds(nextModel)
     ;(window as any).miku = nextModel
 
     status.value = socket ? 'Connected to OpenClaw' : ''
@@ -432,12 +518,13 @@ async function initApp() {
       autoStart: true,
       resizeTo: stageHost.value,
       backgroundAlpha: 1,
-      backgroundColor: 0x222222,
+      backgroundColor: 0xffffff,
     })
   }
 
   await loadModel()
   connectToBridge()
+  bindPointerTracking()
 
   window.addEventListener('resize', handleResize)
 
@@ -464,6 +551,7 @@ onMounted(async () => {
 onUnmounted(() => {
   isUnmounting = true
   window.removeEventListener('resize', handleResize)
+  unbindPointerTracking()
 
   if (reconnectTimer !== null) {
     window.clearTimeout(reconnectTimer)
@@ -499,7 +587,7 @@ onUnmounted(() => {
   height: 100vh;
   overflow: hidden;
   position: relative;
-  background: #222;
+  background: #fff;
   display: flex;
   justify-content: center;
   align-items: center;
