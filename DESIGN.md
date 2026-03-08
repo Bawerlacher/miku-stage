@@ -5,69 +5,78 @@
 This document describes the recommended architecture for turning `miku-stage` into an interactive Live2D client that:
 
 - runs as a normal browser client
-- can optionally be embedded inside an OpenClaw canvas
 - can later be replaced or complemented by native clients
-- displays and animates a Live2D model in a browser/WebView
+- displays and animates a Live2D model in a browser
 - accepts user interaction (text, clicks, voice)
-- sends those interactions to OpenClaw
-- receives commands from OpenClaw to update the model and UI
+- sends those interactions to a stage orchestrator service
+- receives commands from the orchestrator to update the model and UI
 
-The goal is to keep rendering in the client, while OpenClaw remains the backend controller.
+The goal is to keep rendering in the client, while backend orchestration stays outside the frontend runtime.
 
 ## Problem Statement
 
 `miku-stage` currently works as a lightweight browser app:
 
 - Vue provides the page shell
-- Pixi renders the canvas
+- Pixi renders the model surface
 - `pixi-live2d-display` loads and animates the model
 
 This is enough to display a model, but not enough for a full interactive assistant.
 
-The missing piece is a reliable runtime protocol between the browser page and OpenClaw so that:
+The missing piece is a reliable runtime protocol between the browser page and a stage orchestrator so that:
 
-- user input can flow from the page to OpenClaw
-- model commands can flow from OpenClaw back to the page
+- user input can flow from the page to the orchestrator/backend
+- model commands can flow from the orchestrator/backend back to the page
 - chat, voice, and animation stay synchronized
 
 ## Recommended Architecture
 
 Use a protocol-first design:
 
-- `miku-stage` is primarily a browser client hosted on the OpenClaw server
-- the page connects to OpenClaw over a dedicated application WebSocket
-- OpenClaw canvas is an optional embedding path for supported native nodes
-- future native clients should implement the same session protocol instead of depending on canvas
+- `miku-stage` is primarily a browser client with a stable app protocol
+- the page connects to a dedicated Stage Orchestrator over application WebSocket
+- OpenClaw integration is handled behind orchestrator adapters
+- future native clients should implement the same session protocol
 
 ### Core Principle
 
 The browser owns rendering.
-OpenClaw owns intelligence and orchestration.
+The Stage Orchestrator owns session orchestration.
 
 That means:
 
 - the page owns Pixi, Live2D, DOM input, and audio playback
-- OpenClaw owns conversation state, tools, decision-making, and action planning
+- the orchestrator owns session state, transport, and event mapping
+- OpenClaw (when used) owns conversation state, tools, decision-making, and action planning
 
-OpenClaw should send intents, not direct rendering instructions against internal Pixi objects.
+Backends should send intents, not direct rendering instructions against internal Pixi objects.
 
 ## System Components
 
-### 1. OpenClaw Server
+### 1. Stage Orchestrator Service
 
-The OpenClaw server is the central controller.
+The Stage Orchestrator is the runtime control plane for active stage sessions.
 
 Responsibilities:
 
-- hosts the browser client as normal web content
-- may also host the same frontend through the Canvas Host
-- coordinates paired nodes through Gateway WebSocket node sessions and `node.invoke`
-- exposes an application WebSocket endpoint for live session traffic
-- manages conversation state
-- runs LLM/tool logic
-- decides model reactions, expressions, speech, and interruptions
+- expose a stable application WebSocket endpoint for `miku-stage`
+- own stage session lifecycle, identity, and reconnect/resume behavior
+- validate protocol messages and route inbound user events
+- map backend text/events to canonical stage commands
+- return acknowledgements, errors, and status updates to clients
 
-### 2. Browser Client
+### 2. OpenClaw Adapter (Optional Backend)
+
+The OpenClaw adapter is an integration module behind the orchestrator.
+
+Responsibilities:
+
+- bind stage sessions to OpenClaw chat sessions when OpenClaw is used
+- forward user events to OpenClaw Gateway APIs
+- translate OpenClaw streaming output into orchestrator event format
+- isolate OpenClaw-specific integration details from frontend/runtime code
+
+### 3. Browser Client
 
 `miku-stage` is the primary frontend client.
 
@@ -76,7 +85,7 @@ Responsibilities:
 - render the Live2D model
 - provide local UI for chat and controls
 - capture microphone input when needed
-- maintain a client WebSocket connection to OpenClaw
+- maintain a client WebSocket connection to Stage Orchestrator
 - convert server messages into model actions
 - convert user actions into outbound protocol messages
 
@@ -84,37 +93,22 @@ This client should work in:
 
 - a normal desktop browser
 - a normal mobile browser where supported
-- an OpenClaw node WebView when embedded via canvas
 
-### 3. Canvas Host (Optional)
+### 4. Native Clients (Optional, Late Phase)
 
-The Canvas Host is an optional delivery mechanism for supported OpenClaw nodes.
-
-For this design, it can serve the same built `miku-stage` frontend:
-
-- HTML
-- JavaScript bundle
-- CSS
-- local Live2D assets
-
-Canvas hosting is useful for node integration, but it should not be the core product dependency.
-
-### 4. OpenClaw Node (Optional Canvas Adapter)
-
-An OpenClaw node (Mac/iOS/Android/local app) is the user-facing browser surface.
+Native clients (iOS/macOS/Android/desktop) are optional user-facing surfaces.
 
 Responsibilities:
 
-- receives the canvas URL from OpenClaw
-- opens it in a WebView
-- runs the `miku-stage` frontend
-- captures user interaction locally
+- use the same session protocol as browser clients
+- forward user interaction events to Stage Orchestrator
+- apply orchestrator commands to local rendering/runtime layers
 
-The node is an optional delivery surface. It is not required for browser-first operation.
+Native clients are optional delivery surfaces. They are not required for browser-first operation.
 
 ## Communication Paths
 
-There are three separate channels. Keeping them distinct is important.
+There are two separate channels. Keeping them distinct is important.
 
 ### A. Browser HTTP(S)
 
@@ -133,22 +127,11 @@ This is only for loading the page and assets.
 
 This is the primary delivery path for normal browsers.
 
-### B. Canvas Host + `node.invoke` (Optional)
+### B. Application WebSocket
 
 Purpose:
 
-- tell supported nodes which canvas URL to display
-- perform canvas actions like present, hide, navigate, eval, snapshot
-
-This is infrastructure control for the node WebView itself.
-
-It is not the runtime conversation channel for the app.
-
-### C. Application WebSocket
-
-Purpose:
-
-- real-time browser-to-OpenClaw protocol for the active avatar session
+- real-time browser-to-Stage Orchestrator protocol for the active avatar session
 
 This is the main runtime channel for:
 
@@ -159,11 +142,11 @@ This is the main runtime channel for:
 - TTS coordination
 - status and acknowledgements
 
-This should be implemented by `miku-stage` directly.
+This is the main runtime channel between frontend and orchestrator.
 
-## Bridge Service Topology (Decoupled Option)
+## Bridge Service Topology (Primary Option)
 
-If we want `miku-stage` to stay lightweight and avoid coupling to OpenClaw internals, introduce a small stage orchestrator service.
+To keep `miku-stage` lightweight and avoid coupling to OpenClaw internals, use a small stage orchestrator service as the default runtime boundary.
 
 Responsibilities:
 
@@ -174,7 +157,7 @@ Responsibilities:
 
 ### Component Boundaries
 
-- `miku-stage UI` runs in browser/WebView and only handles rendering, local interaction, and playback.
+- `miku-stage UI` runs in a browser and only handles rendering, local interaction, and playback.
 - `Stage Orchestrator` is the runtime controller for active stage sessions.
 - `OpenClaw Gateway` is an optional backend adapter used by the orchestrator.
 - `Direct LLM Backend` is an optional non-OpenClaw backend used by the orchestrator.
@@ -187,7 +170,7 @@ Responsibilities:
 
 ### Runtime Message Flow
 
-1. Browser client connects to orchestrator endpoint (for example `/stage/ws`) with `stageSessionId`.
+1. Browser client connects to orchestrator endpoint (for example `/live/ws`) with `stageSessionId`.
 2. Orchestrator authenticates and binds/creates a backend chat session.
 3. Browser sends user interaction events (text, pointer, optional voice) to orchestrator.
 4. Orchestrator forwards chat turns to backend (OpenClaw WS RPC or direct LLM API).
@@ -213,7 +196,7 @@ Reasons:
 
 - communication is bidirectional
 - the browser needs to send user events upstream
-- OpenClaw needs to push commands downstream
+- the orchestrator/backend needs to push commands downstream
 - it supports streaming and incremental updates cleanly
 - it is suitable for future voice and interruption features
 
@@ -229,11 +212,9 @@ You would still need a separate upload path for:
 
 That leads to a split transport design that becomes awkward once the client is interactive.
 
-### Why Not Reuse Canvas Live Reload WebSocket
+### Why Not Reuse Dev Live Reload WebSocket
 
-The canvas skill may inject a WebSocket for live reload during development.
-
-That channel is not the right app protocol because:
+Any live-reload socket used by frontend tooling is not the right app protocol because:
 
 - it is a development feature
 - it is not designed as your stable session API
@@ -247,34 +228,28 @@ Treat it as internal tooling, not part of the product design.
 
 1. A user opens the hosted `miku-stage` page in a normal browser.
 2. `miku-stage` loads its static assets and Live2D runtime.
-3. `miku-stage` opens an application WebSocket to OpenClaw.
+3. `miku-stage` opens an application WebSocket to Stage Orchestrator.
 4. The page sends `session_ready`.
-5. OpenClaw responds with initial session state, model config, and UI state.
+5. Stage Orchestrator responds with initial session state, model config, and UI state.
 6. The page loads the configured model and becomes interactive.
-
-### Boot Flow (Optional Canvas Path)
-
-1. OpenClaw tells a supported node to present the same `miku-stage` page via canvas.
-2. The node opens the page in its WebView.
-3. The page follows the same boot path as the normal browser client.
 
 ### Text Chat Flow
 
 1. User enters text in the page.
 2. The page sends `user_text`.
-3. OpenClaw processes the input.
-4. OpenClaw streams response text back as `assistant_text_delta`.
-5. OpenClaw sends model actions such as `model_motion` or `model_expression`.
+3. Stage Orchestrator forwards input to configured backend (OpenClaw adapter or direct LLM backend).
+4. Stage Orchestrator streams response text back as `assistant_text_delta`.
+5. Stage Orchestrator sends model actions such as `model_motion` or `model_expression`.
 6. The page updates the model and UI.
-7. OpenClaw sends `assistant_text_done` when complete.
+7. Stage Orchestrator sends `assistant_text_done` when complete.
 
 ### Voice Flow (Initial Version)
 
 1. User activates microphone input in the page.
 2. The page captures audio chunks.
 3. The page sends chunks over WebSocket.
-4. OpenClaw performs speech processing and response generation.
-5. OpenClaw returns text, motion, and optional TTS instructions.
+4. Stage Orchestrator forwards audio to the configured backend for speech processing and response generation.
+5. Stage Orchestrator returns text, motion, and optional TTS instructions.
 6. The page plays audio and animates the model.
 
 This can begin with chunked audio over WebSocket and evolve later if lower-latency voice is required.
@@ -295,7 +270,7 @@ Example shape:
 }
 ```
 
-### Browser -> OpenClaw Messages
+### Browser -> Orchestrator Messages
 
 - `session_ready`
 - `user_text`
@@ -306,7 +281,7 @@ Example shape:
 - `client_error`
 - `pong`
 
-### OpenClaw -> Browser Messages
+### Orchestrator -> Browser Messages
 
 - `session_init`
 - `load_model`
@@ -329,7 +304,7 @@ The stage runtime accepts canonical stage commands only:
 - `model_motion`
 - `model_focus`
 
-Legacy `MIKU_*` aliases are intentionally removed to keep OpenClaw integration strict and predictable.
+Legacy `MIKU_*` aliases are intentionally removed to keep backend integration strict and predictable.
 
 ## Frontend Responsibilities
 
@@ -361,34 +336,34 @@ This keeps the current simplicity while avoiding a future monolithic `App.vue`.
 - final assistant response state
 - orchestration decisions
 
-Those belong to OpenClaw.
+Those belong to the orchestrator/backend.
 
 ## Backend Responsibilities
 
-OpenClaw should expose a dedicated session controller for the avatar.
+Stage Orchestrator should expose a dedicated session controller for the avatar.
 
 Responsibilities:
 
 - authenticate or associate the browser session with a node/user
 - maintain conversation context
 - accept inbound chat and audio events
+- call configured backend adapters (OpenClaw or direct LLM)
 - produce assistant text and reaction commands
 - coordinate TTS generation if used
 - send authoritative state updates to the browser
 
-OpenClaw should avoid assuming details of Pixi or Vue internals.
+Backend adapters should avoid assuming details of Pixi or Vue internals.
 
 ## Deployment Model
 
 ### Recommended Production Flow
 
 1. Build `miku-stage` into static assets.
-2. Host those assets on the OpenClaw server as a normal browser-facing frontend.
-3. Let the page connect back to OpenClaw over application WebSocket.
-4. Optionally expose the same build through the Canvas Host for supported nodes.
-5. Optionally present that same URL in an iOS/macOS/Android node WebView using canvas.
+2. Host those assets on stage web hosting (can be OpenClaw-hosted or standalone).
+3. Let the page connect to Stage Orchestrator over application WebSocket.
+4. Let Stage Orchestrator route to configured backends (OpenClaw adapter or direct LLM backend).
 
-This avoids dependence on a separate Vite dev server in production and keeps one frontend usable across browser and canvas surfaces.
+This avoids dependence on a separate Vite dev server in production and keeps one frontend usable across browser and backend variants.
 
 ### Development Flow
 
@@ -396,15 +371,14 @@ Two development modes are reasonable:
 
 - keep using Vite locally for rapid frontend iteration
 - test direct browser delivery against the hosted backend
-- test node delivery via the canvas host when integration matters
+- test orchestrator integrations with OpenClaw/direct-LLM adapters
 
-Vite is useful for frontend development, but the final deployment target should be the hosted browser build. Canvas is an optional integration target.
+Vite is useful for frontend development, but the final deployment target should be the hosted browser build plus orchestrator runtime.
 
 ## Security Considerations
 
 - The application WebSocket should not be open and anonymous by default.
 - Session identity should be scoped to a node, user, or explicit token.
-- `canvas action:eval` is powerful and should be treated as an administrative tool, not as the normal control path.
 - The frontend should validate inbound message shapes before acting on them.
 - Model URLs should be restricted or validated if remote loading is allowed.
 
@@ -424,7 +398,7 @@ If model loading fails:
 
 - show an error overlay
 - keep the socket session alive
-- allow OpenClaw to send a replacement `load_model`
+- allow orchestrator/backend to send a replacement `load_model`
 
 ### Audio Permission Failure
 
@@ -453,17 +427,17 @@ If microphone permission is denied:
 - send `user_text`
 - render streamed assistant text
 
-### Phase 4: Voice Input and Audio Output
+### Phase 4: Stage Orchestrator Baseline
 
-- add microphone capture
-- send audio chunks to OpenClaw
-- support TTS playback and interruptions
+- evolve `miku-bridge.js` into a production-oriented Stage Orchestrator service
+- expose a stable session API endpoint (for example `/live/ws`) with message validation and routing
+- replace fake local assistant replies with pluggable backend adapter interface
 
-### Phase 5: Canvas And Multi-Client Integration
+### Phase 5: Backend Adapter + Session Reliability
 
-- support loading the same frontend through OpenClaw canvas
-- verify iOS node behavior against the same session protocol
-- keep canvas-specific glue isolated from the core app protocol
+- implement OpenClaw adapter path (plus optional direct-LLM adapter path)
+- enforce stage session identity, auth binding, reconnect/resume semantics
+- handle acknowledgements, errors, interrupts, and telemetry consistently
 
 ### Phase 6: Rich Presence and Polishing
 
@@ -472,10 +446,17 @@ If microphone permission is denied:
 - expression presets
 - better motion orchestration
 
-### Phase 7: Native Client Expansion
+### Phase 7: Voice Input and Audio Output
 
+- add microphone capture
+- send audio chunks to orchestrator
+- support TTS playback and interruptions
+
+### Phase 8: Native Client Expansion
+
+- verify iOS/macOS/Android clients against the same session protocol
 - reuse the same session protocol in native clients
-- keep browser/canvas as one client implementation, not the only implementation
+- keep browser implementation as one client, not the only implementation
 - move native-only UX into dedicated clients without changing backend semantics
 
 ## Non-Goals
@@ -483,20 +464,19 @@ If microphone permission is denied:
 This design does not assume:
 
 - direct backend access to Pixi objects
-- using the canvas live-reload WebSocket as the product protocol
+- using any development live-reload WebSocket as the product protocol
 - server-side rendering of the Live2D model
-- that canvas is the only delivery path
-- that a generic browser is automatically an OpenClaw node
+- that browser is the only delivery path
 
 ## Summary
 
 The recommended design is:
 
-- host `miku-stage` as a normal browser client on the OpenClaw server
-- add a dedicated application WebSocket from the page to OpenClaw
+- host `miku-stage` as a normal browser client (OpenClaw-hosted or standalone)
+- add a dedicated application WebSocket from the page to Stage Orchestrator
 - keep the client responsible for rendering and local input
-- keep OpenClaw responsible for intelligence, state, and orchestration
-- treat canvas as an optional embedding path for supported nodes
+- keep orchestrator responsible for session lifecycle, mapping, and runtime protocol
+- keep OpenClaw as an optional backend intelligence adapter
 - treat the WebSocket message protocol as the long-term foundation for future native clients
 
-This is the simplest architecture that scales from a passive model viewer to a browser client today, optional canvas embedding on supported nodes, and native clients later without changing the backend contract.
+This is the simplest architecture that scales from a passive model viewer to browser-first runtime today and native surfaces later without changing the frontend protocol contract.
