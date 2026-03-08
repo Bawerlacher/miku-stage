@@ -1,3 +1,6 @@
+/**
+ * Cubism loader that ensures Live2D core is available from local or fallback sources.
+ */
 import type { RuntimeWindow } from './types'
 
 const CUBISM_CORE_LOCAL_PATH = 'libs/live2dcubismcore.min.js'

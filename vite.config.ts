@@ -1,3 +1,6 @@
+/**
+ * Vite configuration for serving and bundling the Live2D stage frontend.
+ */
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 

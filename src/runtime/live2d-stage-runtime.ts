@@ -1,3 +1,6 @@
+/**
+ * Live2D canvas runtime responsible for model load, render, and stage interactions.
+ */
 import type { Ref } from 'vue'
 import * as PIXI from 'pixi.js'
 import type { RuntimeWindow } from './types'

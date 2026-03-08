@@ -1,3 +1,6 @@
+/**
+ * Shared runtime environment types used by stage runtime modules.
+ */
 import type * as PIXI from 'pixi.js'
 
 export type StageConfig = {

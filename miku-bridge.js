@@ -1,7 +1,6 @@
-// miku-bridge.js
-// Minimal Phase 2 bridge stub for local development.
-// It provides a session handshake and relays model-control messages
-// between connected clients.
+/**
+ * Local websocket bridge service that manages sessions and relays stage commands.
+ */
 
 import crypto from 'node:crypto'
 import { WebSocket, WebSocketServer } from 'ws'
@@ -48,6 +47,18 @@ function readCommandName(message) {
   }
 
   return command
+}
+
+function readUserText(message) {
+  const payload = asObject(message?.payload)
+  if (!payload) {
+    return null
+  }
+  if (typeof payload.text !== 'string') {
+    return null
+  }
+  const text = payload.text.trim()
+  return text || null
 }
 
 function broadcastExcept(sender, payload) {
@@ -108,6 +119,69 @@ wss.on('connection', (ws, req) => {
             connectedClients: wss.clients.size,
           },
         })
+        return
+      }
+
+      if (type === 'user_text') {
+        const text = readUserText(message)
+        if (!text) {
+          sendJson(ws, {
+            v: STAGE_BRIDGE_PROTOCOL_VERSION,
+            type: 'error',
+            sessionId,
+            payload: {
+              code: 'bad_user_text',
+              message: 'Missing text payload',
+            },
+          })
+          return
+        }
+
+        const reply = `I heard: ${text}`
+        const midpoint = Math.ceil(reply.length / 2)
+        const runId = crypto.randomUUID()
+
+        sendJson(ws, {
+          v: STAGE_BRIDGE_PROTOCOL_VERSION,
+          type: 'assistant_text_delta',
+          sessionId,
+          payload: {
+            runId,
+            delta: reply.slice(0, midpoint),
+          },
+        })
+
+        setTimeout(() => {
+          sendJson(ws, {
+            v: STAGE_BRIDGE_PROTOCOL_VERSION,
+            type: 'assistant_text_delta',
+            sessionId,
+            payload: {
+              runId,
+              delta: reply.slice(midpoint),
+            },
+          })
+          sendJson(ws, {
+            v: STAGE_BRIDGE_PROTOCOL_VERSION,
+            type: 'assistant_text_done',
+            sessionId,
+            payload: {
+              runId,
+              finalText: reply,
+            },
+          })
+          sendJson(ws, {
+            v: STAGE_BRIDGE_PROTOCOL_VERSION,
+            type: 'stage.command',
+            sessionId,
+            payload: {
+              command: 'model_motion',
+              payload: {
+                motion: 'Happy',
+              },
+            },
+          })
+        }, 120)
         return
       }
 

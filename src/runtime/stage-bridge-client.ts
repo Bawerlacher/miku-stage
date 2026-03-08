@@ -1,3 +1,6 @@
+/**
+ * Websocket client that synchronizes OpenClaw bridge events with stage runtime callbacks.
+ */
 import {
   STAGE_BRIDGE_PROTOCOL_VERSION,
   type StageBridgeEnvelope,
@@ -13,8 +16,14 @@ export type StageBridgeClient = {
   connect: () => void
   destroy: () => void
   isConnected: () => boolean
+  sendUserText: (text: string) => boolean
 }
 
+/**
+ * Creates a websocket client that syncs stage runtime state with OpenClaw bridge messages.
+ * @param input Runtime adapters, callbacks, and config required by the bridge client.
+ * @returns Client controls for connection lifecycle and user text dispatch.
+ */
 export function createStageBridgeClient(input: {
   runtimeWindow: RuntimeWindow
   baseUrl: string
@@ -24,6 +33,8 @@ export function createStageBridgeClient(input: {
   onLoadModel: (modelUrl: string) => Promise<void> | void
   onModelMotion: (payload: unknown) => void
   onModelFocus: (payload: unknown) => void
+  onAssistantTextDelta?: (payload: { text: string; runId?: string }) => void
+  onAssistantTextDone?: (payload: { text: string; runId?: string }) => void
   getModelState: () => {
     loaded: boolean
     modelUrl: string
@@ -38,6 +49,8 @@ export function createStageBridgeClient(input: {
     onLoadModel,
     onModelMotion,
     onModelFocus,
+    onAssistantTextDelta,
+    onAssistantTextDone,
     getModelState,
   } = input
 
@@ -47,6 +60,10 @@ export function createStageBridgeClient(input: {
   let isDestroyed = false
   let bridgeSessionId: string | null = null
 
+  /**
+   * Resolves the websocket endpoint from URL params, runtime config, or same-origin default.
+   * @returns Absolute websocket URL string.
+   */
   function resolveBridgeUrl() {
     const searchParams = new URLSearchParams(window.location.search)
     const configuredBridgeUrl =
@@ -66,6 +83,11 @@ export function createStageBridgeClient(input: {
     return resolved.toString()
   }
 
+  /**
+   * Sends a protocol envelope when the websocket is open.
+   * @param message Outbound bridge envelope.
+   * @returns True when message was sent, otherwise false.
+   */
   function sendBridgeMessage(message: StageBridgeEnvelope) {
     if (!socket || socket.readyState !== WebSocket.OPEN) {
       return false
@@ -75,6 +97,11 @@ export function createStageBridgeClient(input: {
     return true
   }
 
+  /**
+   * Normalizes unknown payload values to object shape for protocol replies.
+   * @param payload Arbitrary payload from incoming message.
+   * @returns Object payload safe for outgoing envelope usage.
+   */
   function payloadAsObject(payload: unknown) {
     if (!payload || typeof payload !== 'object') {
       return {}
@@ -83,6 +110,11 @@ export function createStageBridgeClient(input: {
     return payload as Record<string, unknown>
   }
 
+  /**
+   * Routes a stage command to the matching runtime callback.
+   * @param command Parsed stage command from the bridge.
+   * @returns Nothing.
+   */
   function dispatchStageCommand(command: StageCommand) {
     switch (command.name) {
       case 'load_model': {
@@ -104,6 +136,11 @@ export function createStageBridgeClient(input: {
     }
   }
 
+  /**
+   * Parses and handles a single incoming bridge message.
+   * @param rawMessage Raw message payload before normalization.
+   * @returns Nothing.
+   */
   function handleBridgeMessage(rawMessage: unknown) {
     const message = normalizeIncomingStageMessage(rawMessage)
     if (!message) {
@@ -143,6 +180,11 @@ export function createStageBridgeClient(input: {
         })
         break
       case 'assistant_text':
+        if (message.phase === 'done') {
+          onAssistantTextDone?.({ text: message.text, runId: message.runId })
+        } else {
+          onAssistantTextDelta?.({ text: message.text, runId: message.runId })
+        }
         break
       case 'unsupported':
         console.debug('[MIKU-STAGE] Ignoring unsupported bridge message', {
@@ -153,6 +195,10 @@ export function createStageBridgeClient(input: {
     }
   }
 
+  /**
+   * Schedules reconnect with exponential backoff after unexpected disconnect.
+   * @returns Nothing.
+   */
   function scheduleReconnect() {
     if (isDestroyed || reconnectTimer !== null) {
       return
@@ -172,6 +218,10 @@ export function createStageBridgeClient(input: {
     reconnectAttempt += 1
   }
 
+  /**
+   * Opens websocket connection and registers lifecycle handlers.
+   * @returns Nothing.
+   */
   function connect() {
     if (
       socket &&
@@ -237,6 +287,10 @@ export function createStageBridgeClient(input: {
     }
   }
 
+  /**
+   * Stops reconnect attempts and closes current websocket connection.
+   * @returns Nothing.
+   */
   function destroy() {
     isDestroyed = true
 
@@ -253,13 +307,39 @@ export function createStageBridgeClient(input: {
     bridgeSessionId = null
   }
 
+  /**
+   * Reports whether websocket transport is currently open.
+   * @returns True if bridge socket is connected.
+   */
   function isConnected() {
     return Boolean(socket && socket.readyState === WebSocket.OPEN)
+  }
+
+  /**
+   * Sends user chat text through the bridge protocol.
+   * @param text User-entered message content.
+   * @returns True if dispatched to an open socket.
+   */
+  function sendUserText(text: string) {
+    const trimmed = text.trim()
+    if (!trimmed) {
+      return false
+    }
+
+    return sendBridgeMessage({
+      v: STAGE_BRIDGE_PROTOCOL_VERSION,
+      type: 'user_text',
+      sessionId: bridgeSessionId ?? undefined,
+      payload: {
+        text: trimmed,
+      },
+    })
   }
 
   return {
     connect,
     destroy,
     isConnected,
+    sendUserText,
   }
 }

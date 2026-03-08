@@ -1,3 +1,6 @@
+/**
+ * CLI helper that sends bridge protocol commands to a stage websocket endpoint.
+ */
 const WebSocket = require('ws')
 
 const STAGE_BRIDGE_PROTOCOL_VERSION = 1

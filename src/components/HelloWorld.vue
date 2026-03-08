@@ -1,4 +1,5 @@
 <script setup lang="ts">
+// Starter sample component retained from create-vue template.
 import { ref } from 'vue'
 
 defineProps<{ msg: string }>()

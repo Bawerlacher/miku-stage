@@ -1,3 +1,6 @@
+/**
+ * Shared bridge protocol types and normalization helpers for stage messages.
+ */
 export const STAGE_BRIDGE_PROTOCOL_VERSION = 1
 
 export type StageCommandName = 'load_model' | 'model_motion' | 'model_focus'
@@ -38,6 +41,10 @@ export type StageBridgeIncoming =
     }
   | {
       kind: 'assistant_text'
+      phase: 'delta' | 'done'
+      text: string
+      runId?: string
+      payload: Record<string, unknown>
     }
   | {
       kind: 'unsupported'
@@ -86,8 +93,22 @@ export function normalizeIncomingStageMessage(raw: unknown): StageBridgeIncoming
     return { kind: 'ping', sessionId, payload, protocolVersion }
   }
 
-  if (sourceType === 'assistant_text_delta' || sourceType === 'assistant_text_done') {
-    return { kind: 'assistant_text' }
+  if (
+    sourceType === 'assistant_text_delta' ||
+    sourceType === 'assistant_text_done' ||
+    sourceType === 'assistant_text'
+  ) {
+    const phase =
+      sourceType === 'assistant_text_done'
+        ? 'done'
+        : sourceType === 'assistant_text_delta'
+          ? 'delta'
+          : readString(payload.phase) === 'done'
+            ? 'done'
+            : 'delta'
+    const text = extractAssistantText(payload, phase)
+    const runId = readString(payload.runId) ?? readString(payload.responseId) ?? undefined
+    return { kind: 'assistant_text', phase, text, runId, payload }
   }
 
   const directCommand = DIRECT_TYPE_TO_COMMAND[sourceType]
@@ -236,4 +257,21 @@ function readNumber(value: unknown): number | null {
     return null
   }
   return value
+}
+
+function extractAssistantText(payload: Record<string, unknown>, phase: 'delta' | 'done') {
+  const candidates: unknown[] = [
+    payload.text,
+    payload.delta,
+    payload.chunk,
+    phase === 'done' ? payload.finalText : null,
+  ]
+
+  for (const value of candidates) {
+    if (typeof value === 'string') {
+      return value
+    }
+  }
+
+  return ''
 }
