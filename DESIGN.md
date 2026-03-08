@@ -161,6 +161,50 @@ This is the main runtime channel for:
 
 This should be implemented by `miku-stage` directly.
 
+## Bridge Service Topology (Decoupled Option)
+
+If we want `miku-stage` to stay lightweight and avoid coupling to OpenClaw internals, introduce a small stage orchestrator service.
+
+Responsibilities:
+
+- own stage session lifecycle
+- provide a stable session API for the browser client
+- adapt to OpenClaw Gateway APIs when OpenClaw is used
+- allow alternative backends (direct LLM APIs) without changing frontend protocol
+
+### Component Boundaries
+
+- `miku-stage UI` runs in browser/WebView and only handles rendering, local interaction, and playback.
+- `Stage Orchestrator` is the runtime controller for active stage sessions.
+- `OpenClaw Gateway` is an optional backend adapter used by the orchestrator.
+- `Direct LLM Backend` is an optional non-OpenClaw backend used by the orchestrator.
+
+### Stage Orchestrator Internals
+
+- `Session Manager`: maps `stageSessionId` to backend chat session identity and tracks connection state.
+- `Prompt + Motion Mapper`: converts backend text/events into canonical stage commands.
+- `Event Bus`: decouples inbound browser events, backend events, and outbound stage commands.
+
+### Runtime Message Flow
+
+1. Browser client connects to orchestrator endpoint (for example `/stage/ws`) with `stageSessionId`.
+2. Orchestrator authenticates and binds/creates a backend chat session.
+3. Browser sends user interaction events (text, pointer, optional voice) to orchestrator.
+4. Orchestrator forwards chat turns to backend (OpenClaw WS RPC or direct LLM API).
+5. Backend returns streaming text/events.
+6. Orchestrator maps backend output to stage commands:
+   - `load_model`
+   - `model_motion`
+   - `model_focus`
+7. Orchestrator pushes stage commands to browser client.
+8. Browser applies commands to Live2D runtime and optionally sends acknowledgements/client telemetry.
+
+### Design Tradeoffs
+
+- Keeps `miku-stage` frontend protocol stable even if backend changes.
+- Avoids direct dependency on OpenClaw internals inside the frontend runtime.
+- Adds one service boundary, but significantly improves long-term maintainability and backend swap-ability.
+
 ## Why WebSocket
 
 WebSocket is the recommended primary protocol for the app layer.
