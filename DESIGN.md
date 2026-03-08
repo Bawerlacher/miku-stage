@@ -354,6 +354,42 @@ Responsibilities:
 
 Backend adapters should avoid assuming details of Pixi or Vue internals.
 
+## Pairing Setup (OpenClaw Adapter)
+
+When Phase 5 uses the OpenClaw adapter, the orchestrator behaves like a gateway device client, not just a plain bearer-token client.
+
+### Why Pairing Exists
+
+- gateway token auth alone is not enough for long-term device trust
+- OpenClaw gateway issues `connect.challenge` and expects signed `connect.params.device`
+- pairing approval binds this orchestrator identity to an allowed device entry
+
+This keeps adapter auth revocable and auditable per device.
+
+### Runtime Pairing Flow
+
+1. Start Stage Orchestrator with `STAGE_BACKEND_ADAPTER=openclaw`.
+2. Adapter opens gateway WebSocket and receives `connect.challenge`.
+3. Adapter loads identity from `OPENCLAW_GATEWAY_DEVICE_IDENTITY_PATH` (default `~/.openclaw/identity/device.json`) and signs the challenge payload.
+4. Gateway creates a pending device-pair request when identity is unknown.
+5. Operator approves request with `openclaw devices approve <requestId>` or `openclaw devices approve --latest`.
+6. Subsequent connects reuse the paired identity and can execute `chat.send`.
+
+### Configuration Surface
+
+- `OPENCLAW_GATEWAY_TOKEN`: gateway auth token (required for shared-token mode)
+- `OPENCLAW_GATEWAY_DEVICE_TOKEN`: optional device token (alternative auth input)
+- `OPENCLAW_GATEWAY_SCOPES`: requested scopes for connect role negotiation
+- `OPENCLAW_GATEWAY_DEVICE_IDENTITY_PATH`: identity key file path
+- `OPENCLAW_GATEWAY_DEVICE_AUTH_PAYLOAD_VERSION`: signature payload format (`v2` default)
+- `OPENCLAW_GATEWAY_WS_URL`: gateway WebSocket URL
+
+### Operational Notes
+
+- The adapter should request write-capable scopes (`operator.write` or `operator.admin`) for `chat.send`.
+- Pairing approval is a one-time operational step per device identity unless identity keys rotate.
+- If pairing/auth state drifts, `openclaw devices list` is the first diagnostic command.
+
 ## Deployment Model
 
 ### Recommended Production Flow

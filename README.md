@@ -47,6 +47,49 @@ npm install
 npm run dev
 ```
 
+## Pairing setup (OpenClaw adapter)
+
+When Stage Orchestrator runs with `STAGE_BACKEND_ADAPTER=openclaw`, the adapter uses gateway token auth plus device-auth signing. The device must be approved in OpenClaw pairing before `chat.send` works reliably.
+
+### 1. Start orchestrator with OpenClaw adapter
+
+```sh
+STAGE_BACKEND_ADAPTER=openclaw \
+OPENCLAW_GATEWAY_TOKEN='<gateway token>' \
+npm run orchestrator:dev
+```
+
+`OPENCLAW_GATEWAY_TOKEN` can come from `~/.openclaw/openclaw.json` under `gateway.auth.token`.
+
+### 2. Approve pending device pairing
+
+Run these in another terminal after the orchestrator attempts to connect:
+
+```sh
+openclaw devices list
+openclaw devices approve --latest
+```
+
+You can also approve a specific request:
+
+```sh
+openclaw devices approve <requestId>
+```
+
+### 3. Optional adapter env vars
+
+- `OPENCLAW_GATEWAY_WS_URL` (default: `ws://127.0.0.1:18789`)
+- `OPENCLAW_GATEWAY_SCOPES` (comma-separated)
+- `OPENCLAW_GATEWAY_DEVICE_IDENTITY_PATH` (default: `~/.openclaw/identity/device.json`)
+- `OPENCLAW_GATEWAY_DEVICE_AUTH_PAYLOAD_VERSION` (default: `v2`)
+- `OPENCLAW_GATEWAY_DEVICE_TOKEN` (optional token from `~/.openclaw/identity/device-auth.json`)
+
+### 4. Quick troubleshooting
+
+- `missing scope: operator.write`: use a token whose scopes include `operator.write` or `operator.admin`.
+- `pairing required`: run `openclaw devices list` and approve the pending request.
+- `device signature invalid`: keep `OPENCLAW_GATEWAY_DEVICE_AUTH_PAYLOAD_VERSION=v2` for this runtime.
+
 ## Sending commands from CLI
 
 Use one generic script instead of one file per action:

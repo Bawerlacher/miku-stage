@@ -100,6 +100,10 @@ export function createStageOrchestratorServer(input = {}) {
       closeWebSocketServer(wss),
       closeHttpServer(httpServer),
     ])
+
+    if (typeof adapter.destroy === 'function') {
+      adapter.destroy()
+    }
   }
 
   /**

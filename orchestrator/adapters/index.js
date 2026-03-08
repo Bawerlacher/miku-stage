@@ -2,6 +2,7 @@
  * Adapter registry for choosing orchestrator backend integrations.
  */
 import { createEchoStageAdapter } from './echo-stage-adapter.js'
+import { createOpenClawStageAdapter } from './openclaw-stage-adapter.js'
 
 /**
  * Creates a backend adapter from explicit config or environment fallback.
@@ -16,9 +17,11 @@ export function createStageBackendAdapter(input = {}) {
   switch (requested) {
     case 'echo':
       return createEchoStageAdapter()
+    case 'openclaw':
+      return createOpenClawStageAdapter()
     default:
       throw new Error(
-        `Unsupported stage backend adapter "${requested}". Supported adapters: echo.`,
+        `Unsupported stage backend adapter "${requested}". Supported adapters: echo, openclaw.`,
       )
   }
 }
