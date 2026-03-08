@@ -4,7 +4,7 @@
 const WebSocket = require('ws')
 
 const STAGE_BRIDGE_PROTOCOL_VERSION = 1
-const DEFAULT_URL = 'ws://127.0.0.1:5174'
+const DEFAULT_URL = 'ws://127.0.0.1:5174/live/ws'
 const CLOSE_AFTER_MS = 1500
 
 const STAGE_COMMANDS = new Set(['load_model', 'model_motion', 'model_focus'])
@@ -104,6 +104,6 @@ function printUsage() {
     '  node send-command.cjs load_model \'{"modelUrl":"https://.../haru_greeter_t03.model3.json"}\'',
   )
   console.log(
-    '  node send-command.cjs session_ready \'{"client":"openclaw-agent"}\' my-session ws://127.0.0.1:5174',
+    '  node send-command.cjs session_ready \'{"client":"openclaw-agent"}\' my-session ws://127.0.0.1:5174/live/ws',
   )
 }
