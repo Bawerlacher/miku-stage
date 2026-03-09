@@ -11,6 +11,7 @@ import {
 } from './constants.js'
 import { normalizePort, normalizeWsPath } from './config.js'
 import { createStageBackendAdapter } from './adapters/index.js'
+import { createPayloadLogger } from './payload-logging.js'
 import {
   createAckEnvelope,
   createAssistantTextDeltaEnvelope,
@@ -32,6 +33,7 @@ export function createStageOrchestratorServer(input = {}) {
   const wsPath = normalizeWsPath(input.wsPath ?? DEFAULT_ORCHESTRATOR_WS_PATH)
   const adapter = input.adapter ?? createStageBackendAdapter()
   const logger = input.logger ?? console
+  const logPayload = createPayloadLogger({ logger })
 
   const sessions = new Map()
   const connections = new Map()
@@ -214,6 +216,13 @@ export function createStageOrchestratorServer(input = {}) {
   async function handleClientMessage(connection, rawData) {
     const parsedJson = parseJsonMessage(rawData)
     if (!parsedJson.ok) {
+      logPayload('INBOUND_BAD_JSON', {
+        error: parsedJson.error.message,
+        raw: typeof rawData === 'string' ? rawData : rawData.toString(),
+      }, {
+        session: connection.stageSessionId,
+        connection: connection.connectionId,
+      })
       sendError(connection, 'bad_json', parsedJson.error.message)
       return
     }
@@ -231,6 +240,11 @@ export function createStageOrchestratorServer(input = {}) {
 
     const message = parsedEnvelope.message
     touchSession(connection.stageSessionId)
+    logPayload('INBOUND', message, {
+      session: connection.stageSessionId,
+      connection: connection.connectionId,
+      kind: readTrimmedString(message.kind) ?? 'unknown',
+    })
 
     switch (message.kind) {
       case 'session_ready':
@@ -369,6 +383,10 @@ export function createStageOrchestratorServer(input = {}) {
       if (!event) {
         continue
       }
+      logPayload('ADAPTER_EVENT', event, {
+        session: sessionId,
+        connection: sourceConnection.connectionId,
+      })
 
       const eventType = readTrimmedString(event.type)
       if (!eventType) {
@@ -551,6 +569,10 @@ export function createStageOrchestratorServer(input = {}) {
       return
     }
 
+    logPayload('OUTBOUND', envelope, {
+      session: readTrimmedString(envelope.sessionId) ?? 'unknown',
+      type: readTrimmedString(envelope.type) ?? 'unknown',
+    })
     ws.send(JSON.stringify(envelope))
   }
 
