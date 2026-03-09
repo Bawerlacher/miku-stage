@@ -53,7 +53,7 @@ export function createOpenClawStageAdapter(input = {}) {
     name: 'openclaw',
 
     /**
-     * Sends user text to OpenClaw and streams assistant chat events back.
+     * Sends user text to OpenClaw and returns a final assistant event.
      * @param {{ text?: string, stageSessionId?: string, sessionKey?: string }} input Stage interaction payload.
      * @returns {AsyncGenerator<Record<string, unknown>, void, void>} Stream of adapter events.
      */
@@ -108,12 +108,9 @@ export function createOpenClawStageAdapter(input = {}) {
 
         for await (const event of runStream.consume(config.runIdleTimeoutMs)) {
           if (event.kind === 'delta') {
-            bufferedText += event.text
-            yield {
-              type: 'assistant_text_delta',
-              runId: event.runId,
-              text: event.text,
-            }
+            // OpenClaw delta payloads are incremental snapshots in current runtime.
+            // Keep the latest snapshot and only emit one final assistant message.
+            bufferedText = event.text || bufferedText
             continue
           }
 
