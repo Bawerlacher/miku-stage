@@ -11,6 +11,7 @@ import type { RuntimeWindow } from './types'
 
 const RECONNECT_BASE_DELAY_MS = 1_000
 const RECONNECT_MAX_DELAY_MS = 15_000
+const STAGE_SESSION_STORAGE_KEY = 'miku-stage.sessionId'
 
 export type StageBridgeClient = {
   connect: () => void
@@ -58,7 +59,7 @@ export function createStageBridgeClient(input: {
   let reconnectTimer: number | null = null
   let reconnectAttempt = 0
   let isDestroyed = false
-  let bridgeSessionId: string | null = null
+  let bridgeSessionId = resolveInitialBridgeSessionId()
 
   /**
    * Resolves the websocket endpoint from URL params, runtime config, or same-origin default.
@@ -80,7 +81,101 @@ export function createStageBridgeClient(input: {
       resolved.protocol = 'wss:'
     }
 
+    // Keep a stable session identifier attached to each websocket handshake.
+    const sessionIdFromBridgeUrl = readSessionIdFromParams(resolved.searchParams)
+    if (sessionIdFromBridgeUrl) {
+      if (sessionIdFromBridgeUrl !== bridgeSessionId) {
+        bridgeSessionId = sessionIdFromBridgeUrl
+        persistSessionId(bridgeSessionId)
+      }
+    } else {
+      resolved.searchParams.set('stageSessionId', bridgeSessionId)
+    }
+
     return resolved.toString()
+  }
+
+  /**
+   * Resolves initial session identity from URL, persisted storage, or generated fallback.
+   * @returns Stable stage session identifier for this browser profile.
+   */
+  function resolveInitialBridgeSessionId() {
+    const fromPageQuery = readSessionIdFromParams(new URLSearchParams(window.location.search))
+    if (fromPageQuery) {
+      persistSessionId(fromPageQuery)
+      return fromPageQuery
+    }
+
+    const fromStorage = readStoredSessionId()
+    if (fromStorage) {
+      return fromStorage
+    }
+
+    const generated = generateSessionId()
+    persistSessionId(generated)
+    return generated
+  }
+
+  /**
+   * Reads session ID from URL-like query params.
+   * @param params Query-string params object.
+   * @returns Trimmed session ID when present.
+   */
+  function readSessionIdFromParams(params: URLSearchParams) {
+    return normalizeSessionId(
+      params.get('stageSessionId') ?? params.get('sessionId'),
+    )
+  }
+
+  /**
+   * Reads persisted session ID from browser localStorage.
+   * @returns Stored session ID or null when unavailable.
+   */
+  function readStoredSessionId() {
+    try {
+      return normalizeSessionId(window.localStorage.getItem(STAGE_SESSION_STORAGE_KEY))
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Persists session ID to browser localStorage.
+   * @param sessionId Session identifier to persist.
+   * @returns Nothing.
+   */
+  function persistSessionId(sessionId: string) {
+    try {
+      window.localStorage.setItem(STAGE_SESSION_STORAGE_KEY, sessionId)
+    } catch {
+      // Ignore storage write failures in restrictive browser modes.
+    }
+  }
+
+  /**
+   * Generates a best-effort unique session ID.
+   * @returns Random session identifier.
+   */
+  function generateSessionId() {
+    if (typeof window.crypto?.randomUUID === 'function') {
+      return window.crypto.randomUUID()
+    }
+    // Defensive fallback for older embedded webviews/test environments.
+    return `stage-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+  }
+
+  /**
+   * Normalizes unknown session values into non-empty IDs.
+   * @param value Unknown session candidate.
+   * @returns Trimmed session ID or null when invalid.
+   */
+  function normalizeSessionId(value: unknown) {
+    if (typeof value !== 'string') {
+      return null
+    }
+
+    const trimmed = value.trim()
+    return trimmed || null
   }
 
   /**
@@ -156,7 +251,11 @@ export function createStageBridgeClient(input: {
             ? payload.sessionId
             : null
 
-        bridgeSessionId = message.sessionId ?? payloadSessionId ?? bridgeSessionId
+        const resolvedSessionId = message.sessionId ?? payloadSessionId ?? bridgeSessionId
+        if (resolvedSessionId !== bridgeSessionId) {
+          bridgeSessionId = resolvedSessionId
+          persistSessionId(bridgeSessionId)
+        }
         onStatus('')
 
         const nextModelUrl =
@@ -175,7 +274,7 @@ export function createStageBridgeClient(input: {
         sendBridgeMessage({
           v: STAGE_BRIDGE_PROTOCOL_VERSION,
           type: 'pong',
-          sessionId: bridgeSessionId ?? undefined,
+          sessionId: bridgeSessionId,
           payload: payloadAsObject(message.payload),
         })
         break
@@ -248,7 +347,7 @@ export function createStageBridgeClient(input: {
       sendBridgeMessage({
         v: STAGE_BRIDGE_PROTOCOL_VERSION,
         type: 'session_ready',
-        sessionId: bridgeSessionId ?? undefined,
+        sessionId: bridgeSessionId,
         payload: {
           client: clientName,
           pageUrl: window.location.href,
@@ -277,8 +376,6 @@ export function createStageBridgeClient(input: {
         socket = null
       }
 
-      bridgeSessionId = null
-
       if (isDestroyed) {
         return
       }
@@ -303,8 +400,6 @@ export function createStageBridgeClient(input: {
       socket.close()
       socket = null
     }
-
-    bridgeSessionId = null
   }
 
   /**
@@ -329,7 +424,7 @@ export function createStageBridgeClient(input: {
     return sendBridgeMessage({
       v: STAGE_BRIDGE_PROTOCOL_VERSION,
       type: 'user_text',
-      sessionId: bridgeSessionId ?? undefined,
+      sessionId: bridgeSessionId,
       payload: {
         text: trimmed,
       },
