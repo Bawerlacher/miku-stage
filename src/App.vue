@@ -54,6 +54,7 @@ function clearError() {
 const {
   chatInput,
   chatMessages,
+  setSessionId: setChatSessionId,
   bindChatLog,
   appendAssistantDelta,
   finalizeAssistantMessage,
@@ -115,6 +116,9 @@ const bridgeClient = createStageBridgeClient({
   },
   onAssistantTextDone: (payload) => {
     finalizeAssistantMessage(payload)
+  },
+  onSessionId: (sessionId) => {
+    setChatSessionId(sessionId)
   },
   getModelState: () => ({
     loaded: stageRuntime.hasModel(),

@@ -12,6 +12,10 @@ export type ChatMessage = {
   streaming?: boolean
 }
 
+const CHAT_HISTORY_STORAGE_PREFIX = 'miku-stage.chatHistory'
+const CHAT_HISTORY_MAX_SESSIONS = 24
+const CHAT_HISTORY_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1_000
+
 /**
  * Builds reactive chat UI state and helpers for message flow/streaming.
  * @param maxMessages Maximum number of messages to keep in memory.
@@ -25,6 +29,7 @@ export function useStageChat(maxMessages = 80) {
   let chatMessageSeq = 0
   let activeAssistantMessageId: string | null = null
   let activeAssistantRunId: string | null = null
+  let activeSessionId: string | null = null
 
   /**
    * Creates a chat message object with a sequential local ID.
@@ -79,6 +84,161 @@ export function useStageChat(maxMessages = 80) {
   }
 
   /**
+   * Builds localStorage key for a stage session chat history snapshot.
+   * @param sessionId Stage session identifier.
+   * @returns Storage key string.
+   */
+  function getSessionHistoryStorageKey(sessionId: string) {
+    return `${CHAT_HISTORY_STORAGE_PREFIX}:${sessionId}`
+  }
+
+  /**
+   * Saves current chat history snapshot for the active session.
+   * @returns Nothing.
+   */
+  function persistChatHistory() {
+    if (!activeSessionId) {
+      return
+    }
+
+    try {
+      const entries = chatMessages.value.map((message) => ({
+        role: message.role,
+        text: message.text,
+      }))
+      window.localStorage.setItem(
+        getSessionHistoryStorageKey(activeSessionId),
+        JSON.stringify({
+          v: 1,
+          entries,
+          updatedAtMs: Date.now(),
+        }),
+      )
+    } catch {
+      // Ignore storage failures in private/restricted browser contexts.
+    }
+  }
+
+  /**
+   * Removes invalid/stale/overflow chat-history entries from localStorage.
+   * @returns Nothing.
+   */
+  function pruneStoredChatHistory() {
+    try {
+      const now = Date.now()
+      const entries: Array<{ key: string; updatedAtMs: number }> = []
+      const historyKeys: string[] = []
+
+      for (let index = 0; index < window.localStorage.length; index += 1) {
+        const key = window.localStorage.key(index)
+        if (key && key.startsWith(`${CHAT_HISTORY_STORAGE_PREFIX}:`)) {
+          historyKeys.push(key)
+        }
+      }
+
+      for (const key of historyKeys) {
+        const raw = window.localStorage.getItem(key)
+        if (!raw) {
+          window.localStorage.removeItem(key)
+          continue
+        }
+
+        let parsed: { updatedAtMs?: unknown } | null = null
+        try {
+          parsed = JSON.parse(raw) as { updatedAtMs?: unknown }
+        } catch {
+          window.localStorage.removeItem(key)
+          continue
+        }
+
+        const updatedAtMs =
+          typeof parsed?.updatedAtMs === 'number' && Number.isFinite(parsed.updatedAtMs)
+            ? parsed.updatedAtMs
+            : 0
+
+        if (!updatedAtMs || now - updatedAtMs > CHAT_HISTORY_MAX_AGE_MS) {
+          window.localStorage.removeItem(key)
+          continue
+        }
+
+        entries.push({ key, updatedAtMs })
+      }
+
+      if (entries.length <= CHAT_HISTORY_MAX_SESSIONS) {
+        return
+      }
+
+      const overflow = [...entries]
+        .sort((left, right) => left.updatedAtMs - right.updatedAtMs)
+        .slice(0, entries.length - CHAT_HISTORY_MAX_SESSIONS)
+
+      for (const entry of overflow) {
+        window.localStorage.removeItem(entry.key)
+      }
+    } catch {
+      // Ignore cleanup failures in restricted browser contexts.
+    }
+  }
+
+  /**
+   * Loads chat history snapshot for a session and replaces current messages.
+   * @param sessionId Stage session identifier.
+   * @returns Nothing.
+   */
+  function loadChatHistory(sessionId: string) {
+    let loadedMessages: ChatMessage[] = []
+
+    try {
+      const raw = window.localStorage.getItem(getSessionHistoryStorageKey(sessionId))
+      if (raw) {
+        const parsed = JSON.parse(raw) as {
+          entries?: Array<{ role?: unknown; text?: unknown }>
+        }
+        const persistedEntries = Array.isArray(parsed?.entries) ? parsed.entries : []
+        loadedMessages = []
+        for (const [index, entry] of persistedEntries.entries()) {
+          if (
+            (entry.role === 'user' || entry.role === 'assistant' || entry.role === 'system') &&
+            typeof entry.text === 'string'
+          ) {
+            loadedMessages.push({
+              id: `msg-${index + 1}`,
+              role: entry.role,
+              text: entry.text,
+              streaming: false,
+            })
+          }
+        }
+      }
+    } catch {
+      loadedMessages = []
+    }
+
+    chatMessages.value = loadedMessages
+    chatMessageSeq = loadedMessages.length
+    activeAssistantMessageId = null
+    activeAssistantRunId = null
+    trimChatMessages()
+    queueChatScroll()
+  }
+
+  /**
+   * Binds chat state to one stage session and restores its history snapshot.
+   * @param sessionId Stage session identifier.
+   * @returns Nothing.
+   */
+  function setSessionId(sessionId: string) {
+    const trimmed = sessionId.trim()
+    if (!trimmed || trimmed === activeSessionId) {
+      return
+    }
+
+    pruneStoredChatHistory()
+    activeSessionId = trimmed
+    loadChatHistory(trimmed)
+  }
+
+  /**
    * Appends a new message and applies trim/scroll side effects.
    * @param role Message role to append.
    * @param text Message text to append.
@@ -88,6 +248,7 @@ export function useStageChat(maxMessages = 80) {
   function appendChatMessage(role: ChatRole, text: string, streaming = false) {
     chatMessages.value.push(createChatMessage(role, text, streaming))
     trimChatMessages()
+    persistChatHistory()
     queueChatScroll()
   }
 
@@ -150,6 +311,7 @@ export function useStageChat(maxMessages = 80) {
       active.streaming = false
       activeAssistantMessageId = null
       activeAssistantRunId = null
+      persistChatHistory()
       queueChatScroll()
       return
     }
@@ -182,6 +344,7 @@ export function useStageChat(maxMessages = 80) {
   return {
     chatInput,
     chatMessages,
+    setSessionId,
     bindChatLog,
     appendAssistantDelta,
     finalizeAssistantMessage,

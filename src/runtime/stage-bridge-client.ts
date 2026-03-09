@@ -17,6 +17,7 @@ export type StageBridgeClient = {
   connect: () => void
   destroy: () => void
   isConnected: () => boolean
+  getSessionId: () => string
   sendUserText: (text: string) => boolean
 }
 
@@ -36,6 +37,7 @@ export function createStageBridgeClient(input: {
   onModelFocus: (payload: unknown) => void
   onAssistantTextDelta?: (payload: { text: string; runId?: string }) => void
   onAssistantTextDone?: (payload: { text: string; runId?: string }) => void
+  onSessionId?: (sessionId: string) => void
   getModelState: () => {
     loaded: boolean
     modelUrl: string
@@ -52,6 +54,7 @@ export function createStageBridgeClient(input: {
     onModelFocus,
     onAssistantTextDelta,
     onAssistantTextDone,
+    onSessionId,
     getModelState,
   } = input
 
@@ -60,6 +63,7 @@ export function createStageBridgeClient(input: {
   let reconnectAttempt = 0
   let isDestroyed = false
   let bridgeSessionId = resolveInitialBridgeSessionId()
+  onSessionId?.(bridgeSessionId)
 
   /**
    * Resolves the websocket endpoint from URL params, runtime config, or same-origin default.
@@ -87,6 +91,7 @@ export function createStageBridgeClient(input: {
       if (sessionIdFromBridgeUrl !== bridgeSessionId) {
         bridgeSessionId = sessionIdFromBridgeUrl
         persistSessionId(bridgeSessionId)
+        onSessionId?.(bridgeSessionId)
       }
     } else {
       resolved.searchParams.set('stageSessionId', bridgeSessionId)
@@ -255,6 +260,7 @@ export function createStageBridgeClient(input: {
         if (resolvedSessionId !== bridgeSessionId) {
           bridgeSessionId = resolvedSessionId
           persistSessionId(bridgeSessionId)
+          onSessionId?.(bridgeSessionId)
         }
         onStatus('')
 
@@ -411,6 +417,14 @@ export function createStageBridgeClient(input: {
   }
 
   /**
+   * Returns the currently bound stage session identifier.
+   * @returns Stage session identifier used for protocol messages.
+   */
+  function getSessionId() {
+    return bridgeSessionId
+  }
+
+  /**
    * Sends user chat text through the bridge protocol.
    * @param text User-entered message content.
    * @returns True if dispatched to an open socket.
@@ -435,6 +449,7 @@ export function createStageBridgeClient(input: {
     connect,
     destroy,
     isConnected,
+    getSessionId,
     sendUserText,
   }
 }
