@@ -35,19 +35,25 @@ import {
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
 const DEFAULT_RUN_IDLE_TIMEOUT_MS = 120_000
 const DEFAULT_SESSION_KEY_PREFIX = 'stage'
+const DEFAULT_STAGE_MODEL3_PATH = path.resolve(process.cwd(), 'public', 'live2d', 'miku.model3.json')
 const DEFAULT_DEVICE_IDENTITY_PATH = path.join(homedir(), '.openclaw', 'identity', 'device.json')
 const DEFAULT_DEVICE_AUTH_PAYLOAD_VERSION = 'v2'
 const OPENCLAW_ADMIN_SCOPE = 'operator.admin'
 const OPENCLAW_WRITE_SCOPE = 'operator.write'
+const MOTION_DIRECTIVE_PREFIX = 'MOTION'
+const NO_MOTION_LABEL = 'none'
+const NO_MOTION_ALIASES = new Set(['none', 'no_motion', 'no-motion', 'nomotion', 'null'])
 
 /**
  * Creates an OpenClaw adapter implementation for Stage Orchestrator.
- * @param {{ gatewayUrl?: string, protocolVersion?: number, authToken?: string, authDeviceToken?: string, authPassword?: string, deviceAuthEnabled?: boolean, deviceIdentityPath?: string, deviceAuthPayloadVersion?: 'v2' | 'v3', sessionKeyPrefix?: string, requestTimeoutMs?: number, runIdleTimeoutMs?: number, clientId?: string, clientDisplayName?: string, clientVersion?: string, clientPlatform?: string, clientMode?: string, role?: string, scopes?: string[] }} [input] Adapter configuration options.
+ * @param {{ gatewayUrl?: string, protocolVersion?: number, authToken?: string, authDeviceToken?: string, authPassword?: string, deviceAuthEnabled?: boolean, deviceIdentityPath?: string, deviceAuthPayloadVersion?: 'v2' | 'v3', sessionKeyPrefix?: string, model3Path?: string, requestTimeoutMs?: number, runIdleTimeoutMs?: number, clientId?: string, clientDisplayName?: string, clientVersion?: string, clientPlatform?: string, clientMode?: string, role?: string, scopes?: string[] }} [input] Adapter configuration options.
  * @returns {{ name: string, onUserText: (input: Record<string, unknown>) => AsyncGenerator<Record<string, unknown>, void, void>, destroy: () => void }} Adapter interface.
  */
 export function createOpenClawStageAdapter(input = {}) {
   const config = resolveOpenClawAdapterConfig(input)
   const gateway = createOpenClawGatewayClient(config)
+  const motionCatalog = loadSupportedMotionCatalog(config.model3Path)
+  const promptedSessionKeys = new Set()
 
   return {
     name: 'openclaw',
@@ -71,6 +77,10 @@ export function createOpenClawStageAdapter(input = {}) {
             stageSessionId,
             prefix: config.sessionKeyPrefix,
           })
+      const shouldInjectMotionProtocol = !promptedSessionKeys.has(sessionKey)
+      const outboundMessage = shouldInjectMotionProtocol
+        ? buildSessionMotionProtocolPrompt(userText, motionCatalog.motionNames)
+        : userText
       const clientRunId = crypto.randomUUID()
       let activeRunId = clientRunId
       const runStream = gateway.createRunStream(clientRunId)
@@ -82,7 +92,7 @@ export function createOpenClawStageAdapter(input = {}) {
           'chat.send',
           {
             sessionKey,
-            message: userText,
+            message: outboundMessage,
             idempotencyKey: clientRunId,
           },
           config.requestTimeoutMs,
@@ -97,6 +107,10 @@ export function createOpenClawStageAdapter(input = {}) {
             detail: sendResponse.error,
           }
           return
+        }
+
+        if (shouldInjectMotionProtocol) {
+          promptedSessionKeys.add(sessionKey)
         }
 
         const responsePayload = asObject(sendResponse.payload)
@@ -116,20 +130,46 @@ export function createOpenClawStageAdapter(input = {}) {
 
           if (event.kind === 'done') {
             const finalText = event.text || bufferedText
+            const parsedAssistantResponse = parseAssistantResponseForMotion({
+              text: finalText,
+              motionLookup: motionCatalog.motionLookup,
+            })
+            if (parsedAssistantResponse.motion) {
+              yield {
+                type: 'stage_command',
+                command: 'model_motion',
+                payload: {
+                  motion: parsedAssistantResponse.motion,
+                },
+              }
+            }
             yield {
               type: 'assistant_text_done',
               runId: event.runId,
-              text: finalText,
+              text: parsedAssistantResponse.text,
             }
             break
           }
 
           if (event.kind === 'error') {
             if (bufferedText) {
+              const parsedAssistantResponse = parseAssistantResponseForMotion({
+                text: bufferedText,
+                motionLookup: motionCatalog.motionLookup,
+              })
+              if (parsedAssistantResponse.motion) {
+                yield {
+                  type: 'stage_command',
+                  command: 'model_motion',
+                  payload: {
+                    motion: parsedAssistantResponse.motion,
+                  },
+                }
+              }
               yield {
                 type: 'assistant_text_done',
                 runId: event.runId,
-                text: bufferedText,
+                text: parsedAssistantResponse.text,
               }
             }
             yield {
@@ -730,7 +770,7 @@ function createRunEventStream(initialRunId) {
 /**
  * Resolves adapter configuration using explicit input + environment fallback.
  * @param {Record<string, unknown>} input Explicit adapter input config.
- * @returns {{ gatewayUrl: string, protocolVersion: number, requestTimeoutMs: number, runIdleTimeoutMs: number, sessionKeyPrefix: string, authToken?: string, authDeviceToken?: string, authPassword?: string, deviceAuthEnabled: boolean, deviceIdentityPath: string, deviceAuthPayloadVersion: 'v2' | 'v3', clientId: string, clientDisplayName?: string, clientVersion: string, clientPlatform: string, clientMode: string, role: string, scopes: string[] }} Resolved adapter config.
+ * @returns {{ gatewayUrl: string, protocolVersion: number, requestTimeoutMs: number, runIdleTimeoutMs: number, sessionKeyPrefix: string, model3Path: string, authToken?: string, authDeviceToken?: string, authPassword?: string, deviceAuthEnabled: boolean, deviceIdentityPath: string, deviceAuthPayloadVersion: 'v2' | 'v3', clientId: string, clientDisplayName?: string, clientVersion: string, clientPlatform: string, clientMode: string, role: string, scopes: string[] }} Resolved adapter config.
  */
 function resolveOpenClawAdapterConfig(input) {
   const gatewayUrl = normalizeOpenClawGatewayUrl(
@@ -788,6 +828,10 @@ function resolveOpenClawAdapterConfig(input) {
       readTrimmedString(input.sessionKeyPrefix) ??
       readTrimmedString(process.env.OPENCLAW_SESSION_KEY_PREFIX) ??
       DEFAULT_SESSION_KEY_PREFIX,
+    model3Path:
+      readTrimmedString(input.model3Path) ??
+      readTrimmedString(process.env.OPENCLAW_STAGE_MODEL3_PATH) ??
+      DEFAULT_STAGE_MODEL3_PATH,
     authToken,
     authDeviceToken,
     authPassword:
@@ -980,6 +1024,151 @@ function ensureChatSendScopes(scopes) {
   }
 
   return [...scopes, OPENCLAW_WRITE_SCOPE]
+}
+
+/**
+ * Loads supported motion names from the configured Live2D model3.json file.
+ * @param {string} model3Path Absolute or relative model3 JSON path.
+ * @returns {{ motionNames: string[], motionLookup: Map<string, string> }} Motion catalog for prompt/response processing.
+ */
+function loadSupportedMotionCatalog(model3Path) {
+  let motionNames = []
+
+  try {
+    const parsed = JSON.parse(readFileUtf8(model3Path))
+    motionNames = readMotionNamesFromModel3(parsed)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'unknown error'
+    console.warn(
+      `[STAGE-ORCH] Failed to read motion catalog from ${model3Path}. Motion directives disabled. (${message})`,
+    )
+  }
+
+  if (motionNames.length === 0) {
+    return {
+      motionNames: [],
+      motionLookup: new Map(),
+    }
+  }
+
+  const motionLookup = new Map()
+  for (const motionName of motionNames) {
+    motionLookup.set(motionName.toLowerCase(), motionName)
+  }
+
+  return {
+    motionNames,
+    motionLookup,
+  }
+}
+
+/**
+ * Reads motion keys from a Cubism model3 JSON object.
+ * @param {unknown} model3Json Parsed model3 JSON value.
+ * @returns {string[]} Supported motion names.
+ */
+function readMotionNamesFromModel3(model3Json) {
+  const parsedModel = asObject(model3Json)
+  const fileReferences = asObject(parsedModel?.FileReferences)
+  const motions = asObject(fileReferences?.Motions)
+  if (!motions) {
+    return []
+  }
+
+  const motionNames = []
+  for (const motionName of Object.keys(motions)) {
+    const trimmedMotionName = readTrimmedString(motionName)
+    if (!trimmedMotionName) {
+      continue
+    }
+    motionNames.push(trimmedMotionName)
+  }
+  return motionNames
+}
+
+/**
+ * Builds first-message prompt injection that defines session motion response protocol.
+ * @param {string} userText Original user text.
+ * @param {string[]} motionNames Supported motion names from model metadata.
+ * @returns {string} Prompt-injected user message.
+ */
+function buildSessionMotionProtocolPrompt(userText, motionNames) {
+  if (!motionNames.length) {
+    return userText
+  }
+
+  return [
+    'Session instruction:',
+    `For every response in this session, the first line must be exactly "${MOTION_DIRECTIVE_PREFIX}: <motion|${NO_MOTION_LABEL}>".`,
+    `Allowed motion names: ${motionNames.join(', ')}.`,
+    `Use "${NO_MOTION_LABEL}" when no motion should be performed.`,
+    'Write the normal response content starting from line 2.',
+    'Do not include any text before the first motion line.',
+    '',
+    `User message: ${userText}`,
+  ].join('\n')
+}
+
+/**
+ * Parses assistant text for a motion directive on the first line.
+ * @param {{ text: string, motionLookup: Map<string, string> }} input Parse input.
+ * @returns {{ text: string, motion: string | null }} Stripped text plus optional motion name.
+ */
+function parseAssistantResponseForMotion(input) {
+  const rawText = typeof input.text === 'string' ? input.text : ''
+  if (!rawText) {
+    return {
+      text: '',
+      motion: null,
+    }
+  }
+
+  const lines = rawText.split(/\r?\n/)
+  const firstLine = readTrimmedString(lines[0]) ?? ''
+  const motionLineMatch = firstLine.match(/^motion\s*:\s*([A-Za-z0-9._-]+)\s*$/i)
+  if (!motionLineMatch) {
+    return {
+      text: rawText,
+      motion: null,
+    }
+  }
+
+  const motionToken = motionLineMatch[1].toLowerCase()
+  if (NO_MOTION_ALIASES.has(motionToken)) {
+    return {
+      text: stripFirstLine(rawText),
+      motion: null,
+    }
+  }
+
+  const matchedMotion = input.motionLookup.get(motionToken)
+  if (!matchedMotion) {
+    // Keep the original text untouched when the first line is not in expected motion set.
+    return {
+      text: rawText,
+      motion: null,
+    }
+  }
+
+  return {
+    text: stripFirstLine(rawText),
+    motion: matchedMotion,
+  }
+}
+
+/**
+ * Removes the first line (and one optional leading blank line) from a text payload.
+ * @param {string} text Input text.
+ * @returns {string} Remaining text after first-line removal.
+ */
+function stripFirstLine(text) {
+  const firstNewlineIndex = text.indexOf('\n')
+  if (firstNewlineIndex < 0) {
+    return ''
+  }
+
+  const withoutFirstLine = text.slice(firstNewlineIndex + 1)
+  return withoutFirstLine.replace(/^\r?\n/, '')
 }
 
 /**
