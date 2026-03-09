@@ -94,6 +94,16 @@ function handleChatSubmit() {
   submitUserText((text) => bridgeClient.sendUserText(text))
 }
 
+/**
+ * Starts a brand-new chat/session context and reconnects bridge routing.
+ * @returns Nothing.
+ */
+function handleStartNewSession() {
+  const nextSessionId = bridgeClient.startNewSession()
+  clearError()
+  status.value = `Started new session: ${nextSessionId}`
+}
+
 const bridgeClient = createStageBridgeClient({
   runtimeWindow,
   baseUrl: import.meta.env.BASE_URL,
@@ -181,6 +191,9 @@ onUnmounted(() => {
         />
         <button class="stage-chat__send" type="submit" :disabled="!chatInput.trim()">
           Send
+        </button>
+        <button class="stage-chat__new-session" type="button" @click="handleStartNewSession">
+          New Session
         </button>
       </form>
     </section>
@@ -320,6 +333,23 @@ canvas {
 .stage-chat__send:disabled {
   cursor: default;
   opacity: 0.55;
+}
+
+.stage-chat__new-session {
+  border: 1px solid rgba(180, 199, 235, 0.35);
+  border-radius: 0.65rem;
+  background: rgba(18, 24, 38, 0.9);
+  color: #e8efff;
+  font:
+    600 0.78rem/1.1 'Segoe UI',
+    sans-serif;
+  padding: 0.55rem 0.7rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.stage-chat__new-session:hover {
+  border-color: rgba(123, 165, 255, 0.7);
 }
 
 .stage-overlay {

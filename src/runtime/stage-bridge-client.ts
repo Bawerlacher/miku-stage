@@ -18,6 +18,7 @@ export type StageBridgeClient = {
   destroy: () => void
   isConnected: () => boolean
   getSessionId: () => string
+  startNewSession: () => string
   sendUserText: (text: string) => boolean
 }
 
@@ -62,6 +63,7 @@ export function createStageBridgeClient(input: {
   let reconnectTimer: number | null = null
   let reconnectAttempt = 0
   let isDestroyed = false
+  const reconnectSuppressedSockets = new WeakSet<WebSocket>()
   let bridgeSessionId = resolveInitialBridgeSessionId()
   onSessionId?.(bridgeSessionId)
 
@@ -324,18 +326,10 @@ export function createStageBridgeClient(input: {
   }
 
   /**
-   * Opens websocket connection and registers lifecycle handlers.
+   * Opens a websocket for the current session and binds lifecycle handlers.
    * @returns Nothing.
    */
-  function connect() {
-    if (
-      socket &&
-      (socket.readyState === WebSocket.OPEN ||
-        socket.readyState === WebSocket.CONNECTING)
-    ) {
-      return
-    }
-
+  function openSocket() {
     const wsUrl = resolveBridgeUrl()
     onStatus(`Connecting to OpenClaw: ${wsUrl}`)
 
@@ -345,6 +339,12 @@ export function createStageBridgeClient(input: {
     socket = nextSocket
 
     nextSocket.onopen = () => {
+      if (socket !== nextSocket || isDestroyed) {
+        // Ignore stale sockets that were replaced before handshake completion.
+        nextSocket.close(1000, 'stale_socket')
+        return
+      }
+
       reconnectAttempt = 0
       onClearError()
       onStatus('Connected. Waiting for session...')
@@ -364,6 +364,10 @@ export function createStageBridgeClient(input: {
     }
 
     nextSocket.onmessage = (event) => {
+      if (socket !== nextSocket) {
+        return
+      }
+
       try {
         const message = JSON.parse(String(event.data)) as unknown
         console.log('[MIKU-STAGE] Signal received:', message)
@@ -374,20 +378,46 @@ export function createStageBridgeClient(input: {
     }
 
     nextSocket.onerror = (socketError) => {
+      if (socket !== nextSocket) {
+        return
+      }
       console.warn('[MIKU-STAGE] Bridge socket error', socketError)
     }
 
     nextSocket.onclose = () => {
       if (socket === nextSocket) {
         socket = null
+      } else {
+        reconnectSuppressedSockets.delete(nextSocket)
+        return
       }
 
       if (isDestroyed) {
         return
       }
 
+      if (reconnectSuppressedSockets.has(nextSocket)) {
+        reconnectSuppressedSockets.delete(nextSocket)
+        return
+      }
+
       scheduleReconnect()
     }
+  }
+
+  /**
+   * Opens websocket connection and registers lifecycle handlers.
+   * @returns Nothing.
+   */
+  function connect() {
+    if (
+      socket &&
+      (socket.readyState === WebSocket.OPEN ||
+        socket.readyState === WebSocket.CONNECTING)
+    ) {
+      return
+    }
+    openSocket()
   }
 
   /**
@@ -425,6 +455,31 @@ export function createStageBridgeClient(input: {
   }
 
   /**
+   * Rotates to a newly generated stage session and reconnects the bridge transport.
+   * @returns Newly generated stage session identifier.
+   */
+  function startNewSession() {
+    bridgeSessionId = generateSessionId()
+    persistSessionId(bridgeSessionId)
+    onSessionId?.(bridgeSessionId)
+
+    reconnectAttempt = 0
+    if (reconnectTimer !== null) {
+      window.clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
+
+    if (socket) {
+      reconnectSuppressedSockets.add(socket)
+      socket.close(1000, 'new_session')
+      socket = null
+    }
+
+    openSocket()
+    return bridgeSessionId
+  }
+
+  /**
    * Sends user chat text through the bridge protocol.
    * @param text User-entered message content.
    * @returns True if dispatched to an open socket.
@@ -450,6 +505,7 @@ export function createStageBridgeClient(input: {
     destroy,
     isConnected,
     getSessionId,
+    startNewSession,
     sendUserText,
   }
 }
