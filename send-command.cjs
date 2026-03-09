@@ -35,7 +35,7 @@ const message = buildMessage({
   payload,
   sessionId: sessionIdArg || undefined,
 })
-const wsUrl = wsUrlArg || DEFAULT_URL
+const wsUrl = resolveWsUrl(wsUrlArg || DEFAULT_URL, sessionIdArg || undefined)
 
 const ws = new WebSocket(wsUrl)
 
@@ -91,6 +91,17 @@ function buildMessage({ command, payload, sessionId }) {
     sessionId,
     payload,
   }
+}
+
+function resolveWsUrl(rawUrl, sessionId) {
+  const parsed = new URL(rawUrl)
+  if (!sessionId) {
+    return parsed.toString()
+  }
+
+  // Ensure this sender socket joins the same orchestrator session as the stage client.
+  parsed.searchParams.set('stageSessionId', sessionId)
+  return parsed.toString()
 }
 
 function printUsage() {

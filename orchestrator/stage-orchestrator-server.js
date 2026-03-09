@@ -330,14 +330,35 @@ export function createStageOrchestratorServer(input = {}) {
       return
     }
 
-    broadcastToSession(
-      connection.stageSessionId,
+    const targetSessionId =
+      readTrimmedString(message.envelopeSessionId) ?? connection.stageSessionId
+    const deliveredCount = broadcastToSession(
+      targetSessionId,
       createStageCommandEnvelope({
-        sessionId: connection.stageSessionId,
+        sessionId: targetSessionId,
         command,
         payload: asObject(message.commandPayload) ?? {},
       }),
     )
+
+    sendEnvelope(
+      connection.ws,
+      createAckEnvelope({
+        sessionId: targetSessionId,
+        event: 'stage.command',
+        payload: {
+          command,
+          deliveredCount,
+          targetSessionId,
+        },
+      }),
+    )
+
+    if (deliveredCount === 0) {
+      logger.warn(
+        `[STAGE-ORCH] Stage command had no recipients session=${targetSessionId} command=${command}`,
+      )
+    }
   }
 
   /**
@@ -521,21 +542,26 @@ export function createStageOrchestratorServer(input = {}) {
    * Broadcasts one envelope to all clients in a stage session.
    * @param {string} sessionId Stage session ID.
    * @param {Record<string, unknown>} envelope Outbound protocol envelope.
-   * @returns {void} Nothing.
+   * @returns {number} Count of websocket clients that received the envelope.
    */
   function broadcastToSession(sessionId, envelope) {
     const session = sessions.get(sessionId)
     if (!session) {
-      return
+      return 0
     }
 
+    let deliveredCount = 0
     for (const connectionId of session.connectionIds) {
       const connection = connections.get(connectionId)
       if (!connection) {
         continue
       }
-      sendEnvelope(connection.ws, envelope)
+      if (sendEnvelope(connection.ws, envelope)) {
+        deliveredCount += 1
+      }
     }
+
+    return deliveredCount
   }
 
   /**
@@ -562,11 +588,11 @@ export function createStageOrchestratorServer(input = {}) {
    * Sends one JSON envelope over a websocket if open.
    * @param {WebSocket} ws Target websocket.
    * @param {Record<string, unknown>} envelope Outbound envelope payload.
-   * @returns {void} Nothing.
+   * @returns {boolean} True when the envelope was written to an open socket.
    */
   function sendEnvelope(ws, envelope) {
     if (ws.readyState !== WebSocket.OPEN) {
-      return
+      return false
     }
 
     logPayload('OUTBOUND', envelope, {
@@ -574,6 +600,7 @@ export function createStageOrchestratorServer(input = {}) {
       type: readTrimmedString(envelope.type) ?? 'unknown',
     })
     ws.send(JSON.stringify(envelope))
+    return true
   }
 
   /**
