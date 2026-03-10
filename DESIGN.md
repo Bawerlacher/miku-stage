@@ -274,6 +274,7 @@ Example shape:
 
 - `session_ready`
 - `user_text`
+- `interrupt` (compat: `stage_interrupt`)
 - `user_audio_start`
 - `user_audio_chunk`
 - `user_audio_end`
@@ -284,6 +285,8 @@ Example shape:
 ### Orchestrator -> Browser Messages
 
 - `session_init`
+- `ack`
+- `error`
 - `load_model`
 - `assistant_text_delta`
 - `assistant_text_done`
@@ -473,7 +476,7 @@ If microphone permission is denied:
 
 - implement OpenClaw adapter path (plus optional direct-LLM adapter path)
 - enforce stage session identity, auth binding, reconnect/resume semantics
-- handle acknowledgements, errors, interrupts, and telemetry consistently
+- handle acknowledgements, errors, and interrupts consistently
 
 ### Phase 6: Rich Presence and Polishing
 
@@ -494,6 +497,12 @@ If microphone permission is denied:
 - reuse the same session protocol in native clients
 - keep browser implementation as one client, not the only implementation
 - move native-only UX into dedicated clients without changing backend semantics
+
+### Phase 9: Productionization and Observability
+
+- add telemetry foundations (structured logs + metrics; traces optional)
+- define operational dashboards and alert thresholds
+- harden diagnostic data retention and privacy boundaries
 
 ## Non-Goals
 

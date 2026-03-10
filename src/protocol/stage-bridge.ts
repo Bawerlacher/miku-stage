@@ -27,6 +27,33 @@ export type StageBridgeIncoming =
       sourceType: string
     }
   | {
+      kind: 'ack'
+      sessionId?: string
+      event: string
+      payload: Record<string, unknown>
+      protocolVersion?: number
+      sourceType: string
+    }
+  | {
+      kind: 'error'
+      sessionId?: string
+      code: string
+      message: string
+      detail?: unknown
+      payload: Record<string, unknown>
+      protocolVersion?: number
+      sourceType: string
+    }
+  | {
+      kind: 'interrupt'
+      sessionId?: string
+      runId?: string
+      reason?: string
+      payload: Record<string, unknown>
+      protocolVersion?: number
+      sourceType: string
+    }
+  | {
       kind: 'ping'
       sessionId?: string
       payload: Record<string, unknown>
@@ -87,6 +114,36 @@ export function normalizeIncomingStageMessage(raw: unknown): StageBridgeIncoming
 
   if (sourceType === 'session_init') {
     return { kind: 'session_init', sessionId, payload, protocolVersion, sourceType }
+  }
+
+  if (sourceType === 'ack') {
+    const event = readString(payload.event) ?? readString(envelope.event) ?? 'unknown'
+    return { kind: 'ack', sessionId, event, payload, protocolVersion, sourceType }
+  }
+
+  if (sourceType === 'error') {
+    return {
+      kind: 'error',
+      sessionId,
+      code: readString(payload.code) ?? 'bridge_error',
+      message: readString(payload.message) ?? 'Bridge returned an error.',
+      detail: payload.detail,
+      payload,
+      protocolVersion,
+      sourceType,
+    }
+  }
+
+  if (sourceType === 'interrupt') {
+    return {
+      kind: 'interrupt',
+      sessionId,
+      runId: readString(payload.runId) ?? readString(payload.responseId) ?? undefined,
+      reason: readString(payload.reason) ?? undefined,
+      payload,
+      protocolVersion,
+      sourceType,
+    }
   }
 
   if (sourceType === 'ping') {

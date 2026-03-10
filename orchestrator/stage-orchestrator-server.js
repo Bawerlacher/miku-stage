@@ -17,6 +17,7 @@ import {
   createAssistantTextDeltaEnvelope,
   createAssistantTextDoneEnvelope,
   createErrorEnvelope,
+  createInterruptEnvelope,
   createPongEnvelope,
   createSessionInitEnvelope,
   createStageCommandEnvelope,
@@ -261,6 +262,9 @@ export function createStageOrchestratorServer(input = {}) {
       case 'user_text':
         await handleUserText(connection, message)
         return
+      case 'interrupt':
+        await handleInterrupt(connection, message)
+        return
       case 'stage_command':
         handleStageCommand(connection, message)
         return
@@ -303,6 +307,14 @@ export function createStageOrchestratorServer(input = {}) {
       return
     }
 
+    sendEnvelope(connection.ws, createAckEnvelope({
+      sessionId: connection.stageSessionId,
+      event: 'user_text',
+      payload: {
+        textLength: String(message.text ?? '').length,
+      },
+    }))
+
     try {
       const eventSource = adapter.onUserText({
         stageSessionId: connection.stageSessionId,
@@ -314,6 +326,60 @@ export function createStageOrchestratorServer(input = {}) {
     } catch (error) {
       logger.error('[STAGE-ORCH] Adapter user_text handler failed.', error)
       sendError(connection, 'adapter_failure', 'Backend adapter failed while handling user_text.')
+    }
+  }
+
+  /**
+   * Handles an interrupt request and forwards it to the adapter when supported.
+   * @param {{ connectionId: string, stageSessionId: string, ws: WebSocket }} connection Connection state.
+   * @param {Record<string, unknown>} message Parsed interrupt message.
+   * @returns {Promise<void>} Promise resolved after routing/adapter handling.
+   */
+  async function handleInterrupt(connection, message) {
+    const targetSessionId =
+      readTrimmedString(message.envelopeSessionId) ?? connection.stageSessionId
+    const payload = asObject(message.payload) ?? {}
+    const interruptPayload = {
+      ...payload,
+      ...(readTrimmedString(message.runId) ? { runId: readTrimmedString(message.runId) } : {}),
+      ...(readTrimmedString(message.reason) ? { reason: readTrimmedString(message.reason) } : {}),
+    }
+
+    const deliveredCount = broadcastToSession(
+      targetSessionId,
+      createInterruptEnvelope({
+        sessionId: targetSessionId,
+        payload: interruptPayload,
+      }),
+    )
+
+    sendEnvelope(connection.ws, createAckEnvelope({
+      sessionId: targetSessionId,
+      event: 'interrupt',
+      payload: {
+        deliveredCount,
+        targetSessionId,
+      },
+    }))
+
+    if (typeof adapter.onClientEvent !== 'function') {
+      return
+    }
+
+    try {
+      const eventSource = adapter.onClientEvent({
+        stageSessionId: targetSessionId,
+        connectionId: connection.connectionId,
+        type: 'interrupt',
+        payload: interruptPayload,
+      })
+      await emitAdapterEvents({
+        ...connection,
+        stageSessionId: targetSessionId,
+      }, eventSource)
+    } catch (error) {
+      logger.error('[STAGE-ORCH] Adapter interrupt handler failed.', error)
+      sendError(connection, 'adapter_failure', 'Backend adapter failed while handling interrupt.')
     }
   }
 
@@ -457,6 +523,25 @@ export function createStageOrchestratorServer(input = {}) {
             sessionId,
             command,
             payload: asObject(event.payload) ?? {},
+          }),
+        )
+        continue
+      }
+
+      if (eventType === 'interrupt') {
+        const targetSessionId =
+          readTrimmedString(event.sessionId) ?? sessionId
+        const interruptPayload = {
+          ...(asObject(event.payload) ?? {}),
+          ...(readTrimmedString(event.runId) ? { runId: readTrimmedString(event.runId) } : {}),
+          ...(readTrimmedString(event.reason) ? { reason: readTrimmedString(event.reason) } : {}),
+        }
+
+        broadcastToSession(
+          targetSessionId,
+          createInterruptEnvelope({
+            sessionId: targetSessionId,
+            payload: interruptPayload,
           }),
         )
         continue

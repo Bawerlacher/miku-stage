@@ -58,6 +58,7 @@ const {
   bindChatLog,
   appendAssistantDelta,
   finalizeAssistantMessage,
+  interruptAssistantMessage,
   submitUserText,
 } = useStageChat()
 
@@ -126,6 +127,16 @@ const bridgeClient = createStageBridgeClient({
   },
   onAssistantTextDone: (payload) => {
     finalizeAssistantMessage(payload)
+  },
+  onInterrupt: (payload) => {
+    interruptAssistantMessage({ runId: payload.runId })
+  },
+  onAck: (payload) => {
+    console.debug('[MIKU-STAGE] Bridge ack', payload)
+  },
+  onError: (payload) => {
+    const suffix = payload.code ? ` (${payload.code})` : ''
+    setError(`Bridge error${suffix}: ${payload.message}`, payload.detail)
   },
   onSessionId: (sessionId) => {
     setChatSessionId(sessionId)

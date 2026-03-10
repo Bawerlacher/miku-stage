@@ -19,6 +19,7 @@ export type StageBridgeClient = {
   isConnected: () => boolean
   getSessionId: () => string
   startNewSession: () => string
+  sendInterrupt: (input?: { runId?: string; reason?: string }) => boolean
   sendUserText: (text: string) => boolean
 }
 
@@ -38,6 +39,9 @@ export function createStageBridgeClient(input: {
   onModelFocus: (payload: unknown) => void
   onAssistantTextDelta?: (payload: { text: string; runId?: string }) => void
   onAssistantTextDone?: (payload: { text: string; runId?: string }) => void
+  onInterrupt?: (payload: { runId?: string; reason?: string }) => void
+  onAck?: (payload: { event: string; data: Record<string, unknown> }) => void
+  onError?: (payload: { code: string; message: string; detail?: unknown }) => void
   onSessionId?: (sessionId: string) => void
   getModelState: () => {
     loaded: boolean
@@ -55,6 +59,9 @@ export function createStageBridgeClient(input: {
     onModelFocus,
     onAssistantTextDelta,
     onAssistantTextDone,
+    onInterrupt,
+    onAck,
+    onError,
     onSessionId,
     getModelState,
   } = input
@@ -278,6 +285,25 @@ export function createStageBridgeClient(input: {
       case 'stage_command':
         dispatchStageCommand(message.command)
         break
+      case 'ack':
+        onAck?.({
+          event: message.event,
+          data: message.payload,
+        })
+        break
+      case 'error':
+        onError?.({
+          code: message.code,
+          message: message.message,
+          detail: message.detail,
+        })
+        break
+      case 'interrupt':
+        onInterrupt?.({
+          runId: message.runId,
+          reason: message.reason,
+        })
+        break
       case 'ping':
         sendBridgeMessage({
           v: STAGE_BRIDGE_PROTOCOL_VERSION,
@@ -459,6 +485,8 @@ export function createStageBridgeClient(input: {
    * @returns Newly generated stage session identifier.
    */
   function startNewSession() {
+    sendInterrupt({ reason: 'new_session' })
+
     bridgeSessionId = generateSessionId()
     persistSessionId(bridgeSessionId)
     onSessionId?.(bridgeSessionId)
@@ -480,6 +508,30 @@ export function createStageBridgeClient(input: {
   }
 
   /**
+   * Sends an interrupt control message through the bridge protocol.
+   * @param input Optional interrupt metadata.
+   * @returns True if dispatched to an open socket.
+   */
+  function sendInterrupt(input: { runId?: string; reason?: string } = {}) {
+    const payload: Record<string, unknown> = {}
+    const runId = input.runId?.trim()
+    const reason = input.reason?.trim()
+    if (runId) {
+      payload.runId = runId
+    }
+    if (reason) {
+      payload.reason = reason
+    }
+
+    return sendBridgeMessage({
+      v: STAGE_BRIDGE_PROTOCOL_VERSION,
+      type: 'interrupt',
+      sessionId: bridgeSessionId,
+      payload,
+    })
+  }
+
+  /**
    * Sends user chat text through the bridge protocol.
    * @param text User-entered message content.
    * @returns True if dispatched to an open socket.
@@ -489,6 +541,9 @@ export function createStageBridgeClient(input: {
     if (!trimmed) {
       return false
     }
+
+    // Request cancellation of any in-flight run before starting a new user turn.
+    sendInterrupt({ reason: 'new_user_text' })
 
     return sendBridgeMessage({
       v: STAGE_BRIDGE_PROTOCOL_VERSION,
@@ -506,6 +561,7 @@ export function createStageBridgeClient(input: {
     isConnected,
     getSessionId,
     startNewSession,
+    sendInterrupt,
     sendUserText,
   }
 }

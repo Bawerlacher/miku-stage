@@ -26,6 +26,11 @@ const PASSTHROUGH_EVENT_TYPES = new Set([
   'user_audio_end',
 ])
 
+const INTERRUPT_EVENT_TYPES = new Set([
+  'interrupt',
+  'stage_interrupt',
+])
+
 /**
  * Parses a raw client websocket message into a validated routing object.
  * @param {unknown} rawEnvelope Raw JSON-decoded message payload.
@@ -93,6 +98,21 @@ export function parseIncomingClientEnvelope(rawEnvelope) {
       envelopeSessionId,
       payload,
       text,
+    })
+  }
+
+  if (INTERRUPT_EVENT_TYPES.has(sourceType)) {
+    return valid({
+      kind: 'interrupt',
+      sourceType,
+      protocolVersion,
+      envelopeSessionId,
+      payload,
+      runId:
+        readTrimmedString(payload.runId) ??
+        readTrimmedString(payload.responseId) ??
+        undefined,
+      reason: readTrimmedString(payload.reason) ?? undefined,
     })
   }
 
@@ -225,6 +245,20 @@ export function createStageCommandEnvelope(input) {
       command: input.command,
       payload: input.payload ?? {},
     },
+  }
+}
+
+/**
+ * Builds an interrupt control envelope.
+ * @param {{ sessionId: string, payload?: Record<string, unknown> }} input Interrupt fields.
+ * @returns {{ v: number, type: string, sessionId: string, payload: Record<string, unknown> }} Outbound websocket envelope.
+ */
+export function createInterruptEnvelope(input) {
+  return {
+    v: STAGE_BRIDGE_PROTOCOL_VERSION,
+    type: 'interrupt',
+    sessionId: input.sessionId,
+    payload: input.payload ?? {},
   }
 }
 

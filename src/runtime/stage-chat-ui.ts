@@ -322,6 +322,31 @@ export function useStageChat(maxMessages = 80) {
   }
 
   /**
+   * Stops any active streaming assistant message for the matching run.
+   * @param payload Optional interrupt payload with run identifier.
+   * @returns Nothing.
+   */
+  function interruptAssistantMessage(payload?: { runId?: string }) {
+    const active = activeAssistantMessageId
+      ? chatMessages.value.find((message) => message.id === activeAssistantMessageId)
+      : null
+    if (!active) {
+      return
+    }
+
+    const incomingRunId = payload?.runId?.trim()
+    if (incomingRunId && activeAssistantRunId && incomingRunId !== activeAssistantRunId) {
+      return
+    }
+
+    active.streaming = false
+    activeAssistantMessageId = null
+    activeAssistantRunId = null
+    persistChatHistory()
+    queueChatScroll()
+  }
+
+  /**
    * Submits trimmed user input through the provided transport callback.
    * @param send Sender callback; returns true when message is dispatched.
    * @returns Nothing.
@@ -348,6 +373,7 @@ export function useStageChat(maxMessages = 80) {
     bindChatLog,
     appendAssistantDelta,
     finalizeAssistantMessage,
+    interruptAssistantMessage,
     submitUserText,
   }
 }
