@@ -57,6 +57,11 @@
 				{
 					"File": "motion/surprise.motion3.json"
 				}
+			],
+			"Thinking": [
+				{
+					"File": "motion/thinking.motion3.json"
+				}
 			]
 		}
 	},
