@@ -50,6 +50,35 @@ function clearError() {
   error.value = ''
 }
 
+// Counts submitted turns that haven't received assistant_text_done yet.
+// Thinking stops only when all in-flight turns have responded, so a stale
+// done from an older run (when interrupt isn't honoured) doesn't kill the
+// loop for a newer turn. Works for both delta-streaming and done-only paths.
+let pendingThinkingTurns = 0
+
+// Safety timeout: if the backend never responds (dead/hung), stop the
+// thinking loop so Miku doesn't get stuck thinking forever.
+const THINKING_TIMEOUT_MS = 60_000
+let thinkingTimeoutId: ReturnType<typeof setTimeout> | null = null
+
+function startThinkingTimeout() {
+  if (thinkingTimeoutId !== null) {
+    clearTimeout(thinkingTimeoutId)
+  }
+  thinkingTimeoutId = setTimeout(() => {
+    thinkingTimeoutId = null
+    pendingThinkingTurns = 0
+    stageRuntime.stopThinkingMotion()
+  }, THINKING_TIMEOUT_MS)
+}
+
+function clearThinkingTimeout() {
+  if (thinkingTimeoutId !== null) {
+    clearTimeout(thinkingTimeoutId)
+    thinkingTimeoutId = null
+  }
+}
+
 // Keep chat state/stream assembly isolated from stage boot/runtime concerns.
 const {
   chatInput,
@@ -92,7 +121,15 @@ async function loadModel(nextModelUrl = stageRuntime.getCurrentModelUrl()) {
  * @returns Nothing.
  */
 function handleChatSubmit() {
-  submitUserText((text) => bridgeClient.sendUserText(text))
+  submitUserText((text) => {
+    const sent = bridgeClient.sendUserText(text)
+    if (sent) {
+      pendingThinkingTurns++
+      stageRuntime.startThinkingMotion()
+      startThinkingTimeout()
+    }
+    return sent
+  })
 }
 
 /**
@@ -100,6 +137,9 @@ function handleChatSubmit() {
  * @returns Nothing.
  */
 function handleStartNewSession() {
+  pendingThinkingTurns = 0
+  clearThinkingTimeout()
+  stageRuntime.stopThinkingMotion()
   const nextSessionId = bridgeClient.startNewSession()
   clearError()
   status.value = `Started new session: ${nextSessionId}`
@@ -126,15 +166,33 @@ const bridgeClient = createStageBridgeClient({
     appendAssistantDelta(payload)
   },
   onAssistantTextDone: (payload) => {
+    if (pendingThinkingTurns > 0) {
+      pendingThinkingTurns--
+    }
+    if (pendingThinkingTurns === 0) {
+      clearThinkingTimeout()
+      stageRuntime.stopThinkingMotion()
+    }
     finalizeAssistantMessage(payload)
   },
   onInterrupt: (payload) => {
+    // 'new_user_text' is a self-interrupt sent by the client before each user
+    // turn to cancel any in-flight run. The server echoes it back, but it
+    // should not stop the thinking motion we just started.
+    if (payload.reason !== 'new_user_text') {
+      pendingThinkingTurns = 0
+      clearThinkingTimeout()
+      stageRuntime.stopThinkingMotion()
+    }
     interruptAssistantMessage({ runId: payload.runId })
   },
   onAck: (payload) => {
     console.debug('[MIKU-STAGE] Bridge ack', payload)
   },
   onError: (payload) => {
+    pendingThinkingTurns = 0
+    clearThinkingTimeout()
+    stageRuntime.stopThinkingMotion()
     const suffix = payload.code ? ` (${payload.code})` : ''
     setError(`Bridge error${suffix}: ${payload.message}`, payload.detail)
   },
@@ -166,6 +224,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  clearThinkingTimeout()
   bridgeClient.destroy()
   stageRuntime.destroy()
 })

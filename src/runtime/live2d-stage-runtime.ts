@@ -14,6 +14,8 @@ export type Live2DStageRuntime = {
   loadModel: (nextModelUrl?: string) => Promise<void>
   applyModelFocus: (payload: unknown) => void
   applyModelMotion: (payload: unknown) => void
+  startThinkingMotion: () => void
+  stopThinkingMotion: () => void
   hasModel: () => boolean
   getCurrentModelUrl: () => string
 }
@@ -32,6 +34,30 @@ export function createLive2DStageRuntime(input: {
   let currentModel: Live2DModelInstance | null = null
   let currentModelUrl = input.initialModelUrl
   let pointerTrackingBound = false
+  let isThinking = false
+  let currentMotionManager: any = null
+
+  const THINKING_MOTION_GROUP = 'Thinking'
+
+  function handleMotionFinish() {
+    console.debug('[live2d] motionFinish fired, isThinking:', isThinking)
+    if (!isThinking || !currentModel) {
+      return
+    }
+    // Defer past state.complete() — motionFinish fires before the manager clears
+    // currentPriority, so a synchronous reserve() call here gets rejected.
+    // queueMicrotask runs after the full update() tick, at which point
+    // currentPriority is 0 and the Thinking reservation wins over Idle.
+    const modelSnapshot = currentModel
+    queueMicrotask(() => {
+      if (!isThinking || currentModel !== modelSnapshot) {
+        console.debug('[live2d] thinking restart skipped (stopped or model changed)')
+        return
+      }
+      console.debug('[live2d] restarting Thinking motion')
+      void modelSnapshot.motion(THINKING_MOTION_GROUP)
+    })
+  }
 
   async function getLive2DModule() {
     if (!live2dModule) {
@@ -173,6 +199,14 @@ export function createLive2DStageRuntime(input: {
     currentModel = nextModel
     currentModelUrl = nextModelUrl
 
+    if (currentMotionManager) {
+      currentMotionManager.off('motionFinish', handleMotionFinish)
+    }
+    currentMotionManager = (nextModel as any).internalModel?.motionManager ?? null
+    if (currentMotionManager) {
+      currentMotionManager.on('motionFinish', handleMotionFinish)
+    }
+
     app.stage.addChild(nextModel)
     layoutModel(nextModel)
     remapFocusParameterIds(nextModel)
@@ -230,12 +264,42 @@ export function createLive2DStageRuntime(input: {
       return
     }
 
+    // Stop thinking first so its NORMAL priority slot is freed before we
+    // try to reserve the new motion (also NORMAL). Without this the new
+    // motion's reserve() call is rejected: priority(2) <= currentPriority(2).
+    stopThinkingMotion()
     currentModel.motion(motion)
+  }
+
+  function startThinkingMotion() {
+    if (!currentModel) {
+      console.debug('[live2d] startThinkingMotion: no model loaded, skipping')
+      return
+    }
+    console.debug('[live2d] startThinkingMotion')
+    isThinking = true
+    void currentModel.motion(THINKING_MOTION_GROUP)
+  }
+
+  function stopThinkingMotion() {
+    if (!isThinking) {
+      return
+    }
+    console.debug('[live2d] stopThinkingMotion')
+    isThinking = false
+    // Immediately clear the motion queue so the next motion can reserve at
+    // NORMAL priority. Without this, the thinking motion keeps holding
+    // currentPriority=2 until it naturally finishes, blocking anything else.
+    currentMotionManager?.stopAllMotions()
   }
 
   function destroy() {
     window.removeEventListener('resize', handleResize)
     unbindPointerTracking()
+    if (currentMotionManager) {
+      currentMotionManager.off('motionFinish', handleMotionFinish)
+      currentMotionManager = null
+    }
 
     if (app) {
       app.destroy(true)
@@ -259,6 +323,8 @@ export function createLive2DStageRuntime(input: {
     loadModel,
     applyModelFocus,
     applyModelMotion,
+    startThinkingMotion,
+    stopThinkingMotion,
     hasModel,
     getCurrentModelUrl,
   }
