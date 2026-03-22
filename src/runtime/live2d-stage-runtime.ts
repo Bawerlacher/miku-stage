@@ -32,6 +32,9 @@ export function createLive2DStageRuntime(input: {
   let live2dModule: Live2DModule | null = null
   let app: PIXI.Application | null = null
   let currentModel: Live2DModelInstance | null = null
+  let lofiOverlay: PIXI.Container | null = null
+  let lofiWarmthG: PIXI.Graphics | null = null
+  let lofiVignetteSprite: PIXI.Sprite | null = null
   let currentModelUrl = input.initialModelUrl
   let pointerTrackingBound = false
   let isThinking = false
@@ -168,11 +171,58 @@ export function createLive2DStageRuntime(input: {
   }
 
   function handleResize() {
-    if (!currentModel) {
-      return
-    }
+    const { width, height } = getHostSize()
+    if (currentModel) layoutModel(currentModel)
+    if (lofiOverlay) drawLoFiRects(width, height)
+  }
 
-    layoutModel(currentModel)
+  // Bake a vignette into an HTML canvas (no PIXI filter pipeline involved).
+  // Returns a PixiJS texture from the canvas element.
+  function createVignetteTexture(width: number, height: number): PIXI.Texture {
+    const c = document.createElement('canvas')
+    c.width = width
+    c.height = height
+    const ctx = c.getContext('2d')!
+    const cx = width / 2
+    const cy = height / 2
+    const r = Math.max(width, height) * 0.75
+    const grd = ctx.createRadialGradient(cx, cy, 0, cx, cy, r)
+    grd.addColorStop(0.35, 'rgba(0,0,0,0)')
+    grd.addColorStop(1.0, 'rgba(0,0,0,0.82)')
+    ctx.fillStyle = grd
+    ctx.fillRect(0, 0, width, height)
+    return PIXI.Texture.from(c)
+  }
+
+  function drawLoFiRects(width: number, height: number) {
+    // Warmth: redraw to new dimensions
+    lofiWarmthG?.clear()
+    lofiWarmthG?.beginFill(0xff9933) // amber
+    lofiWarmthG?.drawRect(0, 0, width, height)
+    lofiWarmthG?.endFill()
+
+    // Vignette: recreate canvas texture at new dimensions
+    if (lofiVignetteSprite) {
+      const old = lofiVignetteSprite.texture
+      lofiVignetteSprite.texture = createVignetteTexture(width, height)
+      old.destroy(true)
+    }
+  }
+
+  function buildLoFiOverlay(width: number, height: number): PIXI.Container {
+    const container = new PIXI.Container()
+
+    // Layer 1: warm amber tint at low opacity — no blend mode tricks, just alpha
+    lofiWarmthG = new PIXI.Graphics()
+    lofiWarmthG.alpha = 0.07
+    container.addChild(lofiWarmthG)
+
+    // Layer 2: vignette from HTML canvas radial gradient — no PIXI filter pipeline
+    lofiVignetteSprite = new PIXI.Sprite()
+    container.addChild(lofiVignetteSprite)
+
+    drawLoFiRects(width, height)
+    return container
   }
 
   function payloadAsObject(payload: unknown) {
@@ -227,6 +277,16 @@ export function createLive2DStageRuntime(input: {
         backgroundColor: 0xffffff,
       })
     }
+
+    // LoFi overlay: rendered as plain display objects on top of the model.
+    // Filtering app.stage directly (or any container holding the Live2D model)
+    // breaks pixi-live2d-display's custom WebGL renderer. Effects are composited
+    // as separate overlay objects with no PIXI filter pipeline involvement.
+    app.stage.sortableChildren = true
+    const { width, height } = getHostSize()
+    lofiOverlay = buildLoFiOverlay(width, height)
+    lofiOverlay.zIndex = 10 // above model (default zIndex = 0)
+    app.stage.addChild(lofiOverlay)
 
     bindPointerTracking()
     window.addEventListener('resize', handleResize)
@@ -300,6 +360,10 @@ export function createLive2DStageRuntime(input: {
       currentMotionManager.off('motionFinish', handleMotionFinish)
       currentMotionManager = null
     }
+
+    lofiOverlay = null
+    lofiWarmthG = null
+    lofiVignetteSprite = null
 
     if (app) {
       app.destroy(true)
