@@ -234,9 +234,15 @@ onUnmounted(() => {
   <div ref="stageHost" class="miku-container">
     <canvas ref="canvas"></canvas>
     <section class="stage-chat">
+      <header class="stage-chat__header">
+        <span class="stage-chat__title">Miku</span>
+        <button class="stage-chat__new-session" type="button" title="New session" @click="handleStartNewSession">
+          ↺
+        </button>
+      </header>
       <div :ref="bindChatLog" class="stage-chat__messages">
         <p v-if="chatMessages.length === 0" class="stage-chat__placeholder">
-          Chat with the stage to trigger motions and responses.
+          Say something to start the conversation.
         </p>
         <article
           v-for="message in chatMessages"
@@ -245,8 +251,7 @@ onUnmounted(() => {
           :class="`stage-chat__message--${message.role}`"
         >
           <p class="stage-chat__text">
-            {{ message.text }}
-            <span v-if="message.streaming" class="stage-chat__typing">...</span>
+            {{ message.text }}<span v-if="message.streaming" class="stage-chat__cursor" aria-hidden="true"></span>
           </p>
         </article>
       </div>
@@ -257,13 +262,10 @@ onUnmounted(() => {
           type="text"
           name="chat"
           autocomplete="off"
-          placeholder="Type a message"
+          placeholder="Say something…"
         />
         <button class="stage-chat__send" type="submit" :disabled="!chatInput.trim()">
           Send
-        </button>
-        <button class="stage-chat__new-session" type="button" @click="handleStartNewSession">
-          New Session
         </button>
       </form>
     </section>
@@ -272,6 +274,14 @@ onUnmounted(() => {
     </div>
   </div>
 </template>
+
+<style>
+html, body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+</style>
 
 <style scoped>
 .miku-container {
@@ -291,19 +301,66 @@ canvas {
   height: 100%;
 }
 
+/* ── Miku cyber theme palette ───────────────────────────────────────────── */
+/* primary teal : #39C5BB   glow teal : rgba(57,197,187,…)                  */
+
 .stage-chat {
   position: absolute;
   right: 1rem;
   bottom: 4.5rem;
-  width: min(26rem, calc(100vw - 2rem));
-  max-height: min(46vh, 30rem);
-  border: 1px solid rgba(148, 167, 196, 0.24);
+  width: min(36rem, calc(100vw - 2rem));
+  max-height: min(62vh, 44rem);
+  border: 1px solid rgba(57, 197, 187, 0.35);
   border-radius: 1rem;
-  background: rgba(10, 14, 24, 0.74);
-  backdrop-filter: blur(5px);
+  background:
+    linear-gradient(rgba(57, 197, 187, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(57, 197, 187, 0.03) 1px, transparent 1px),
+    rgba(8, 22, 26, 0.52);
+  background-size: 24px 24px, 24px 24px, auto;
+  backdrop-filter: blur(14px);
+  box-shadow:
+    0 0 0 1px rgba(57, 197, 187, 0.08) inset,
+    0 0 32px rgba(57, 197, 187, 0.08);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+.stage-chat__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.55rem 0.75rem 0.55rem 0.9rem;
+  border-bottom: 1px solid rgba(57, 197, 187, 0.18);
+  flex-shrink: 0;
+}
+
+.stage-chat__title {
+  color: #39C5BB;
+  font:
+    700 0.72rem/1 'Segoe UI',
+    sans-serif;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  text-shadow: 0 0 8px rgba(57, 197, 187, 0.6);
+}
+
+.stage-chat__new-session {
+  border: 1px solid rgba(57, 197, 187, 0.25);
+  border-radius: 0.5rem;
+  background: transparent;
+  color: rgba(57, 197, 187, 0.6);
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0.2rem 0.35rem;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, text-shadow 0.15s;
+}
+
+.stage-chat__new-session:hover {
+  color: #39C5BB;
+  border-color: rgba(57, 197, 187, 0.7);
+  text-shadow: 0 0 6px rgba(57, 197, 187, 0.7);
 }
 
 .stage-chat__messages {
@@ -312,132 +369,158 @@ canvas {
   padding: 0.9rem;
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
+  gap: 0.55rem;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(57, 197, 187, 0.3) transparent;
+}
+
+.stage-chat__messages::-webkit-scrollbar {
+  width: 4px;
+}
+
+.stage-chat__messages::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.stage-chat__messages::-webkit-scrollbar-thumb {
+  background: rgba(57, 197, 187, 0.3);
+  border-radius: 2px;
 }
 
 .stage-chat__placeholder {
   margin: 0;
-  color: #c8d4f3;
+  color: rgba(57, 197, 187, 0.4);
   font:
-    500 0.82rem/1.4 'Segoe UI',
+    400 0.82rem/1.5 'Segoe UI',
     sans-serif;
+  text-align: center;
+  padding: 1rem 0;
 }
 
 .stage-chat__message {
   max-width: 90%;
-  padding: 0.55rem 0.65rem;
+  padding: 0.55rem 0.75rem;
   border-radius: 0.75rem;
 }
 
 .stage-chat__message--user {
   align-self: flex-end;
-  background: rgba(70, 117, 240, 0.28);
+  background: rgba(57, 197, 187, 0.15);
+  border: 1px solid rgba(57, 197, 187, 0.3);
 }
 
 .stage-chat__message--assistant {
   align-self: flex-start;
-  background: rgba(208, 222, 255, 0.16);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .stage-chat__message--system {
   align-self: center;
-  background: rgba(255, 176, 72, 0.2);
+  background: rgba(255, 176, 72, 0.12);
+  border: 1px solid rgba(255, 176, 72, 0.2);
 }
 
 .stage-chat__text {
   margin: 0;
-  color: #ecf2ff;
+  color: rgba(220, 245, 244, 0.92);
   white-space: pre-wrap;
   word-break: break-word;
   font:
-    500 0.86rem/1.38 'Segoe UI',
+    400 0.87rem/1.5 'Segoe UI',
     sans-serif;
 }
 
-.stage-chat__typing {
-  margin-left: 0.2rem;
-  letter-spacing: 0.08em;
-  opacity: 0.8;
+.stage-chat__message--user .stage-chat__text {
+  color: #d4f5f3;
+}
+
+.stage-chat__cursor {
+  display: inline-block;
+  width: 2px;
+  height: 0.85em;
+  background: #39C5BB;
+  border-radius: 1px;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  box-shadow: 0 0 4px rgba(57, 197, 187, 0.8);
+  animation: blink 0.9s step-end infinite;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
 }
 
 .stage-chat__composer {
   display: flex;
   gap: 0.55rem;
   padding: 0.75rem;
-  border-top: 1px solid rgba(194, 211, 247, 0.18);
+  border-top: 1px solid rgba(57, 197, 187, 0.15);
 }
 
 .stage-chat__input {
   flex: 1;
-  border: 1px solid rgba(180, 199, 235, 0.3);
+  border: 1px solid rgba(57, 197, 187, 0.25);
   border-radius: 0.65rem;
-  background: rgba(8, 11, 19, 0.62);
-  color: #f4f8ff;
-  padding: 0.55rem 0.65rem;
+  background: rgba(4, 14, 16, 0.55);
+  color: #e8f8f7;
+  padding: 0.55rem 0.75rem;
   font:
-    500 0.87rem/1.2 'Segoe UI',
+    400 0.87rem/1.2 'Segoe UI',
     sans-serif;
 }
 
 .stage-chat__input::placeholder {
-  color: rgba(209, 220, 247, 0.72);
+  color: rgba(57, 197, 187, 0.4);
 }
 
 .stage-chat__input:focus {
   outline: none;
-  border-color: rgba(123, 165, 255, 0.75);
+  border-color: rgba(57, 197, 187, 0.7);
+  box-shadow: 0 0 0 2px rgba(57, 197, 187, 0.1);
 }
 
 .stage-chat__send {
-  border: 0;
+  border: 1px solid rgba(57, 197, 187, 0.5);
   border-radius: 0.65rem;
-  background: linear-gradient(180deg, #6c9dff, #4d78d8);
-  color: #fff;
+  background: linear-gradient(160deg, rgba(57, 197, 187, 0.25), rgba(57, 197, 187, 0.12));
+  color: #39C5BB;
   font:
     600 0.85rem/1.1 'Segoe UI',
     sans-serif;
-  padding: 0.55rem 0.9rem;
+  padding: 0.55rem 1rem;
   cursor: pointer;
+  transition: background 0.15s, box-shadow 0.15s;
+}
+
+.stage-chat__send:hover:not(:disabled) {
+  background: linear-gradient(160deg, rgba(57, 197, 187, 0.4), rgba(57, 197, 187, 0.2));
+  box-shadow: 0 0 10px rgba(57, 197, 187, 0.25);
 }
 
 .stage-chat__send:disabled {
   cursor: default;
-  opacity: 0.55;
+  opacity: 0.35;
 }
 
-.stage-chat__new-session {
-  border: 1px solid rgba(180, 199, 235, 0.35);
-  border-radius: 0.65rem;
-  background: rgba(18, 24, 38, 0.9);
-  color: #e8efff;
-  font:
-    600 0.78rem/1.1 'Segoe UI',
-    sans-serif;
-  padding: 0.55rem 0.7rem;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.stage-chat__new-session:hover {
-  border-color: rgba(123, 165, 255, 0.7);
-}
 
 .stage-overlay {
   position: absolute;
   inset: auto 1rem 1rem 1rem;
   padding: 0.85rem 1rem;
-  border: 1px solid rgba(201, 215, 255, 0.14);
+  border: 1px solid rgba(57, 197, 187, 0.2);
   border-radius: 0.75rem;
-  background: rgba(9, 12, 18, 0.78);
-  color: #dfe7ff;
+  background: rgba(8, 22, 26, 0.72);
+  color: rgba(57, 197, 187, 0.85);
   font:
-    500 0.95rem/1.4 'Segoe UI',
+    500 0.9rem/1.4 'Segoe UI',
     sans-serif;
 }
 
 .stage-overlay--error {
-  border-color: rgba(255, 120, 120, 0.28);
-  color: #ffd8d8;
+  border-color: rgba(255, 100, 100, 0.3);
+  color: #ffb8b8;
 }
 
 .stage-overlay p {
@@ -449,7 +532,7 @@ canvas {
     right: 0.65rem;
     bottom: 4.65rem;
     width: calc(100vw - 1.3rem);
-    max-height: 44vh;
+    max-height: 58vh;
   }
 }
 </style>

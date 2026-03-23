@@ -79,11 +79,11 @@ export function createLive2DStageRuntime(input: {
 
   function layoutModel(model: Live2DModelInstance) {
     const { width, height } = getHostSize()
-    const scale = Math.min(width / model.width, height / model.height) * 0.9
+    const scale = Math.min(width / model.width, height / model.height)
 
     model.scale.set(scale)
     model.anchor.set(0.5, 0.5)
-    model.position.set(width / 2, height / 2)
+    model.position.set(width / 4, height / 2)
   }
 
   function normalizeModelId(rawId: unknown) {
@@ -183,7 +183,7 @@ export function createLive2DStageRuntime(input: {
     c.width = width
     c.height = height
     const ctx = c.getContext('2d')!
-    const cx = width / 2
+    const cx = width / 4
     const cy = height / 2
     const r = Math.max(width, height) * 0.75
     const grd = ctx.createRadialGradient(cx, cy, 0, cx, cy, r)
@@ -260,7 +260,7 @@ export function createLive2DStageRuntime(input: {
     app.stage.addChild(nextModel)
     layoutModel(nextModel)
     remapFocusParameterIds(nextModel)
-    ;(window as Window & { miku?: Live2DModelInstance }).miku = nextModel
+      ; (window as Window & { miku?: Live2DModelInstance }).miku = nextModel
   }
 
   function init() {
