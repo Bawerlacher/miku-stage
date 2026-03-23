@@ -26,7 +26,7 @@ import {
 
 /**
  * Creates the Stage Orchestrator server controller.
- * @param {{ port?: number, wsPath?: string, adapter?: Record<string, unknown>, logger?: Console }} [input] Server configuration.
+ * @param {{ port?: number, wsPath?: string, adapter?: Record<string, unknown>, logger?: Console, externalHttpServer?: import('node:http').Server }} [input] Server configuration.
  * @returns {{ start: () => void, stop: () => Promise<void>, getState: () => Record<string, unknown> }} Server lifecycle controller.
  */
 export function createStageOrchestratorServer(input = {}) {
@@ -35,12 +35,13 @@ export function createStageOrchestratorServer(input = {}) {
   const adapter = input.adapter ?? createStageBackendAdapter()
   const logger = input.logger ?? console
   const logPayload = createPayloadLogger({ logger })
+  const externalHttpServer = input.externalHttpServer ?? null
 
   const sessions = new Map()
   const connections = new Map()
   let started = false
 
-  const httpServer = http.createServer((request, response) => {
+  const httpServer = externalHttpServer ?? http.createServer((request, response) => {
     const pathname = readPathname(request.url)
     if (pathname === '/healthz') {
       response.statusCode = 200
@@ -77,11 +78,17 @@ export function createStageOrchestratorServer(input = {}) {
     bindUpgradeHandler()
     bindWebSocketHandler()
 
-    httpServer.listen(port, () => {
+    if (externalHttpServer) {
       logger.info(
-        `[STAGE-ORCH] Listening on ws://127.0.0.1:${port}${wsPath} adapter=${adapter.name}`,
+        `[STAGE-ORCH] Attached to external server at ${wsPath} adapter=${adapter.name}`,
       )
-    })
+    } else {
+      httpServer.listen(port, () => {
+        logger.info(
+          `[STAGE-ORCH] Listening on ws://127.0.0.1:${port}${wsPath} adapter=${adapter.name}`,
+        )
+      })
+    }
   }
 
   /**
@@ -99,10 +106,11 @@ export function createStageOrchestratorServer(input = {}) {
       connection.ws.close()
     }
 
-    await Promise.allSettled([
-      closeWebSocketServer(wss),
-      closeHttpServer(httpServer),
-    ])
+    const shutdownTasks = [closeWebSocketServer(wss)]
+    if (!externalHttpServer) {
+      shutdownTasks.push(closeHttpServer(httpServer))
+    }
+    await Promise.allSettled(shutdownTasks)
 
     if (typeof adapter.destroy === 'function') {
       adapter.destroy()
@@ -131,7 +139,9 @@ export function createStageOrchestratorServer(input = {}) {
     httpServer.on('upgrade', (request, socket, head) => {
       const pathname = readPathname(request.url)
       if (pathname !== wsPath) {
-        rejectUpgrade(socket, 404, `Stage Orchestrator websocket is available at ${wsPath}`)
+        if (!externalHttpServer) {
+          rejectUpgrade(socket, 404, `Stage Orchestrator websocket is available at ${wsPath}`)
+        }
         return
       }
 

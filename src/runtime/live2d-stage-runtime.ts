@@ -79,7 +79,7 @@ export function createLive2DStageRuntime(input: {
 
   function layoutModel(model: Live2DModelInstance) {
     const { width, height } = getHostSize()
-    const scale = Math.min(width / model.width, height / model.height) * 0.8
+    const scale = Math.min(width / model.width, height / model.height) * 0.9
 
     model.scale.set(scale)
     model.anchor.set(0.5, 0.5)

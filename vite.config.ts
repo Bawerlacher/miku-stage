@@ -3,21 +3,15 @@
  */
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import { stageOrchestratorPlugin } from './vite-plugin-stage-orchestrator.js'
 
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [vue(), stageOrchestratorPlugin()],
   base: '/live/',
   server: {
     host: '0.0.0.0',
     port: 5173,
     allowedHosts: ['www.bawerlacher.com'],
-    proxy: {
-      '/live/ws': {
-        target: 'ws://127.0.0.1:5174',
-        ws: true,
-        changeOrigin: true,
-      },
-    },
     hmr: {
         protocol: 'wss',
         host: 'www.bawerlacher.com',
