@@ -1,6 +1,9 @@
 <script setup lang="ts">
 // App shell that wires stage runtime, bridge transport, and chat UI rendering.
 import { onMounted, onUnmounted, ref } from 'vue'
+import { marked } from 'marked'
+
+marked.use({ breaks: true })
 import { ensureCubismCore } from './runtime/cubism-core'
 import { useStageChat } from './runtime/stage-chat-ui'
 import { createLive2DStageRuntime } from './runtime/live2d-stage-runtime'
@@ -205,6 +208,10 @@ const bridgeClient = createStageBridgeClient({
   }),
 })
 
+function renderMarkdown(text: string): string {
+  return marked.parse(text) as string
+}
+
 onMounted(async () => {
   try {
     await ensureCubismCore({
@@ -248,11 +255,14 @@ onUnmounted(() => {
           v-for="message in chatMessages"
           :key="message.id"
           class="stage-chat__message"
-          :class="`stage-chat__message--${message.role}`"
+          :class="[`stage-chat__message--${message.role}`, { 'stage-chat__message--streaming': message.streaming }]"
         >
-          <p class="stage-chat__text">
-            {{ message.text }}<span v-if="message.streaming" class="stage-chat__cursor" aria-hidden="true"></span>
-          </p>
+          <div
+            v-if="message.role === 'assistant'"
+            class="stage-chat__text stage-chat__text--md"
+            v-html="renderMarkdown(message.text)"
+          ></div>
+          <p v-else class="stage-chat__text">{{ message.text }}</p>
         </article>
       </div>
       <form class="stage-chat__composer" @submit.prevent="handleChatSubmit">
@@ -281,6 +291,60 @@ html, body {
   padding: 0;
   overflow: hidden;
 }
+
+/* Markdown rendered content (unscoped — required for v-html targeting) */
+.stage-chat__text--md * {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+.stage-chat__text--md p + p { margin-top: 0.3em; }
+.stage-chat__text--md li p  { margin: 0; }
+.stage-chat__text--md h1,
+.stage-chat__text--md h2,
+.stage-chat__text--md h3 {
+  color: #39C5BB;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  margin-bottom: 0.2em;
+  font-size: inherit;
+}
+.stage-chat__text--md h1 { font-size: 1rem; }
+.stage-chat__text--md h2 { font-size: 0.95rem; }
+.stage-chat__text--md h3 { font-size: 0.88rem; }
+.stage-chat__text--md * + h1,
+.stage-chat__text--md * + h2,
+.stage-chat__text--md * + h3 { margin-top: 0.5em; }
+.stage-chat__text--md ul,
+.stage-chat__text--md ol  { padding-left: 1.2em; margin-top: 0.15em; }
+.stage-chat__text--md li  { margin-bottom: 0.1em; }
+.stage-chat__text--md li:last-child { margin-bottom: 0; }
+.stage-chat__text--md strong { color: #a8eae7; font-weight: 600; }
+.stage-chat__text--md em     { color: rgba(220,245,244,0.75); font-style: italic; }
+.stage-chat__text--md code {
+  background: rgba(57,197,187,0.12);
+  border: 1px solid rgba(57,197,187,0.2);
+  border-radius: 0.25em;
+  padding: 0.1em 0.35em;
+  font-size: 0.82em;
+  font-family: 'Consolas', 'Cascadia Code', monospace;
+  color: #7de8e2;
+}
+.stage-chat__text--md pre {
+  background: rgba(4,14,16,0.7);
+  border: 1px solid rgba(57,197,187,0.2);
+  border-radius: 0.5rem;
+  padding: 0.65rem 0.8rem;
+  overflow-x: auto;
+  margin-top: 0.3em;
+}
+.stage-chat__text--md pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 0.82em;
+  color: #a8eae7;
+}
 </style>
 
 <style scoped>
@@ -307,7 +371,8 @@ canvas {
 .stage-chat {
   position: absolute;
   right: 1rem;
-  bottom: 4.5rem;
+  top: 50%;
+  transform: translateY(-50%);
   width: min(36rem, calc(100vw - 2rem));
   max-height: min(62vh, 44rem);
   border: 1px solid rgba(57, 197, 187, 0.35);
@@ -435,10 +500,12 @@ canvas {
   color: #d4f5f3;
 }
 
-.stage-chat__cursor {
+.stage-chat__message--streaming .stage-chat__text::after,
+.stage-chat__message--streaming .stage-chat__text--md::after {
+  content: '';
   display: inline-block;
   width: 2px;
-  height: 0.85em;
+  height: 0.82em;
   background: #39C5BB;
   border-radius: 1px;
   margin-left: 2px;
@@ -451,6 +518,7 @@ canvas {
   0%, 100% { opacity: 1; }
   50% { opacity: 0; }
 }
+
 
 .stage-chat__composer {
   display: flex;
@@ -467,7 +535,7 @@ canvas {
   color: #e8f8f7;
   padding: 0.55rem 0.75rem;
   font:
-    400 0.87rem/1.2 'Segoe UI',
+    400 0.87rem/1.5 'Segoe UI',
     sans-serif;
 }
 
@@ -530,7 +598,8 @@ canvas {
 @media (max-width: 768px) {
   .stage-chat {
     right: 0.65rem;
-    bottom: 4.65rem;
+    top: 50%;
+    transform: translateY(-50%);
     width: calc(100vw - 1.3rem);
     max-height: 58vh;
   }
